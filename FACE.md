@@ -1,4 +1,4 @@
-# Chaos 安装器 → 表盘（`.face`）：已打包
+# Chaos 安装器 · 表盘打包记录
 
 - 日期：2026-10-04（**v2**：把 flash 里那句 rcS 开机 hook **移植进本包**，并加「移除文件」按钮）
 - 产物：`face/chaos_inst/output/chaos_inst.face`（**305,836 B**，md5 `c89fcca5a77c2fa9b4771188cde21d18`）

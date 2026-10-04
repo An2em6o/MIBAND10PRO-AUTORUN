@@ -345,7 +345,7 @@ echo q3 >> LOG                 # ← 动作**之后**
 
 ---
 
-## 10 两个匿名样本（照抄骨架即可）
+## 10 两个样本骨架（照抄即可）
 
 ### 样本一：只要发**一条**命令
 
@@ -362,9 +362,6 @@ echo c0 >> /data/<D>/autostart.log
 dd if=<设备节点> of=/data/<D>/status2.bin bs=384 count=1 conv=notrunc
 echo m3 >> /data/<D>/autostart.log
 echo done >> /data/<D>/autostart.log
-```
-
-
 ```
 
 ### 样本二：要发**多条**命令 + 多次回读

@@ -2,7 +2,7 @@
 
 > **让"开机自动跑一次原生模块"变成一件可注册、可回滚、防砖的事 —— 并且不改固件、不碰 flash。**
 
-本仓库 = **一个管理器**（`10pro.autorun` 表盘）+ **两份模块接入件**（Chaos / Shell++ II）+ **一份匿名接入标准** + 全套设计与运维文档。
+本仓库 = **一个管理器**（`10pro.autorun` 表盘）+ **两份模块接入件**（Chaos / Shell++ II）+ **一份接入标准** + 全套设计与运维文档。
 
 | | |
 |---|---|
@@ -225,7 +225,7 @@ chaos-autostart/
 │   ├── installer/chaos_installer.lua ← 唯一真源（Lua 安装器）
 │   └── tools/                    ← 构建 / 校验 .ko
 │
-├── MODULE-STANDARD.md            ★★ 匿名接入标准（不含任何模块名）
+├── MODULE-STANDARD.md            ★★ 接入标准（通用，不绑定任何具体模块）
 ├── REGISTER.md                   ★ 注册契约（写给模块作者）
 ├── MANAGER.md                    ★★ 管理器设计（v0.6.6，114 KB）
 ├── FACE.md                       ← chaos 安装器 → 表盘 打包记录
@@ -362,14 +362,14 @@ cat /data/<模块>/autostart.log # 模块自己写的：末行 done = 本模块�
 
 | 文档 | 讲什么 | 状态 |
 |---|---|---|
-| [`MODULE-STANDARD.md`](MODULE-STANDARD.md) | **匿名接入标准**：任何原生模块想开机自动跑一次，边界在哪、要怎么做、不许做什么、nsh 语法子集白/黑名单、三种特殊情况、可观测性、自证清单 | **现行** |
-| [`REGISTER.md`](REGISTER.md) | **注册契约**：写给模块作者 —— 落点、脚本形态、管理器侧行为（由 266 项判据咬住） | **现行** |
+| [`MODULE-STANDARD.md`](MODULE-STANDARD.md) | **接入标准**：任何原生模块想开机自动跑一次，边界在哪、要怎么做、不许做什么、nsh 语法子集白/黑名单、三种特殊情况、可观测性、自证清单 | **现行** |
+| [`REGISTER.md`](REGISTER.md) | **注册契约**：模块作者要遵守的落点、脚本形态与管理器侧行为（266 项判据咬住） | **现行** |
 | [`MANAGER.md`](MANAGER.md) | **管理器设计**：v0.6.6 完整设计、迭代史、真机 bug 复盘、界面与判据 | **现行** |
-| [`FACE.md`](FACE.md) | chaos 安装器 → 表盘（`.face`）的打包记录与流水线 | 现行（§顶部有 v3 横幅） |
-| [`NOTICE.md`](NOTICE.md) | 许可与来源 | **现行** |
-| `Chaos-Module/README.md` | chaos 模块本体：能力、构建、安装 | 现行（上游派生） |
-| `modules/shellpp2-autorun/README.md` | Shell++ II 自启动页接入件：落点、脚本全文、门、验收 | **现行** |
-| [`examples/probe.sh`](examples/probe.sh) | 接入前**先在真机确认前提**的探针 | 现行 |
+| [`FACE.md`](FACE.md) | **表盘打包记录**：安装器 → `.face` 的流水线与判据 | 现行（§顶部有 v3 横幅） |
+| [`NOTICE.md`](NOTICE.md) | **许可与来源** | **现行** |
+| `Chaos-Module/README.md` | **模块本体**：能力、构建、安装 | 现行（上游派生） |
+| `modules/shellpp2-autorun/README.md` | **接入件**：Shell++ II 的落点、脚本全文、门与验收 | **现行** |
+| [`examples/probe.sh`](examples/probe.sh) | **接入前探针**：先在真机确认前提 | 现行 |
 | `patches/` | 上游原版与补丁留档（`chaos_installer.master.lua` / `.diff` / `ipc.rs.diff`） | 留档 |
 
 ### 使用文档

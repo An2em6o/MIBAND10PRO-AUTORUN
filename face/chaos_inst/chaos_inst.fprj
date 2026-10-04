@@ -1,0 +1,6 @@
+<?xml version="1.0" ?>
+<FaceProject DeviceType="11">
+	<Screen Title="Chaos 自启动" Bitmap="preview.png" Width="336" Height="480">
+		<Widget xmlns:p3="http://www.w3.org/2001/XMLSchema-instance" p3:type="FaceWidgetContainer" Shape="34" Name="app__lua%2F_Lua%2Fdotui.lua" X="0" Y="0" Width="336" Height="480" Alpha="0" Visible_Src="0"/>
+	</Screen>
+</FaceProject>

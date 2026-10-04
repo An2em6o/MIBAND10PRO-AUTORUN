@@ -1,0 +1,327 @@
+--- /c/Users/Administrator/AppData/Local/Temp/chaos_probe/Chaos-Module-master/installer/chaos_installer.lua	2026-10-03 23:39:04.055481900 +0800
++++ Chaos-Module/installer/chaos_installer.lua	2026-10-04 05:06:18.293505900 +0800
+@@ -56,9 +56,31 @@
+ local STATUS_MAGIC = 0x53484332        -- "2CHS"
+ local STATUS_VERSION = 0x43485302      -- "CHS2"
+ local CMD_INSTALL = 2
++-- 开机序列触发命令号, 与 supervisor/src/ipc.rs 的 CMD_BOOT_DQ 是同一个数。
++-- 收到它, 模块只做一件事: 建一台 UI 线程的定时器并返回 —— 序列由模块自己按拍跑。
++local CMD_BOOT_DQ = 0x53484333         -- "3CHS"
+ local STATUS_SIZE = 192
+ local STATE_ACTIVE = 1
+ 
++-- ===== 开机自启动(设备侧那半) =====
++-- 做法与同机已跑通的另一个原生应用平台一致, 差别只有节奏(见下面两个延时):
++--   * 命令帧 / rc 脚本 / 开关文件**全部由这里(UI 侧)落盘**; flash 里那句开机 hook 是那个平台打的;
++--   * rc 里"先删开关 -> 干活 -> 整段走完才重建开关" => 窗内重启则停在【关】(防砖);
++--   * 只发 1 条命令(模块自己按 1s 一拍走序列), 所以 rc 里没有 cmds.bin、没有多段时序文件。
++-- 为什么不能 rc 里直接 dd 那几条安装命令: 模块的 write 是**同步**的, 在 sh 任务里
++-- 同步跑注册链会挂死到看门狗 —— 所以只能走"入环即返回"的 CMD_BOOT_DQ。
++local RC_PATH = "/data/rc"
++local RC_HOP = "sh /data/chaos/rc &"   -- 往 RC_PATH 末尾补的二跳(幂等, 已有就不再加)
++local CHAOS_RC = DATA_DIR .. "/rc"
++local BOOT_FRAME = DATA_DIR .. "/boot.bin"
++local FLAG_ON = DATA_DIR .. "/autostart.on"
++local AS_LOG = DATA_DIR .. "/autostart.log"
++-- 开机后多久开始干活, 以及"整段跑完"要等的安全延时。
++-- 本机把这两档都比上游平台调大了: 8s 是等开机负载过去(此时 miwear / launcher 自己还在起),
++-- 15s 是等模块把 3 步序列(每步 1s)走完、并让 launcher 把桌面条目真的发出来。
++local AUTOSTART_DELAY = 8
++local SAFETY_WAIT_S = 15
++
+ local status_label
+ -- 运行器状态: runner = 当前执行中的 timer; step_index = 步骤游标;
+ -- started_once = 本次会议跑过没有(一个模块只能装一次, 跑过必须重启);
+@@ -103,6 +125,18 @@
+   return body
+ end
+ 
++-- 写整个文件并**回读核对**(自启动那几个文件错一个字节就是"开机什么都不发生",
++-- 而且是静默的 —— 界面看不出来)。返回 true, 或 false + 原因。
++local function write_file(path, body)
++  local f = io.open(path, "wb")
++  if not f then return false, "打不开 " .. path end
++  local ok = pcall(f.write, f, body)
++  local cok = pcall(f.close, f)
++  if not ok or not cok then return false, "写入失败 " .. path end
++  if read_all(path) ~= body then return false, "回读不一致 " .. path end
++  return true
++end
++
+ -- 语言检测: getprop <键> 含 "zh" = 中文界面。
+ -- 只留两个布尔量: lang_seen(有没有读到过任何语言属性, 决定是否走 fallback)、
+ -- lang_zh(是不是中文, 决定发 0x18 还是 0x19)。
+@@ -219,6 +253,109 @@
+   return table.concat(pieces)
+ end
+ 
++-- ===================== 开机自启动: 落盘 + 开关 =====================
++
++-- rc 脚本全文。语法**逐条**取自同机那个平台已经跑通的 /data/rc 子集:
++--   set +e / if [ -f ]…fi / rm -f / echo > 、>> / sleep / insmod / dd
++-- 不能用的(没有证据): && || [ -e ] [ ! ] $( ) —— nsh 是子集解释器。
++-- 防砖语义: 开头先删开关, 整段(含安全窗)走完才重建; 窗内掉电/看门狗/主动重启
++-- 都让开关停在【关】, 下次开机整段跳过。这就是"防砖"的全部机制。
++local function build_chaos_rc()
++  local L = {}
++  local function w(s) L[#L + 1] = s end
++  w("set +e")
++  w("if [ -f " .. FLAG_ON .. " ];then")
++  w("rm -f " .. FLAG_ON)
++  w("echo start > " .. AS_LOG)
++  w("echo delay=" .. AUTOSTART_DELAY .. " >> " .. AS_LOG)
++  w("sleep " .. AUTOSTART_DELAY)
++  w("insmod " .. SUPERVISOR_PATH .. " chaos_sup")
++  w("echo insmod >> " .. AS_LOG)
++  w("dd if=" .. DEVICE_PATH .. " of=" .. DATA_DIR .. "/stage1.bin bs="
++    .. STATUS_SIZE .. " count=1 conv=notrunc")
++  w("dd if=" .. BOOT_FRAME .. " of=" .. DEVICE_PATH .. " bs=16 count=1 conv=notrunc")
++  w("echo boot_cmd_sent >> " .. AS_LOG)
++  w("echo safehold=" .. SAFETY_WAIT_S .. " >> " .. AS_LOG)
++  w("sleep " .. SAFETY_WAIT_S)
++  w("echo safehold_ok >> " .. AS_LOG)
++  w("dd if=" .. DEVICE_PATH .. " of=" .. DATA_DIR .. "/stage3.bin bs="
++    .. STATUS_SIZE .. " count=1 conv=notrunc")
++  w("echo done >> " .. AS_LOG)
++  w("echo on > " .. FLAG_ON)
++  w("echo cleared >> " .. AS_LOG)
++  w("fi")
++  return table.concat(L, "\n") .. "\n"
++end
++
++-- 16 字节命令帧: magic | cmd | arg0 | arg1。
++-- 两个"魔数"都挑成了可打印 ASCII ⇒ 整串就是 "1CHS3CHS" + 8 个 0, 落盘后肉眼就能核。
++local function build_boot_frame()
++  return u32le(CMD_MAGIC) .. u32le(CMD_BOOT_DQ) .. u32le(0) .. u32le(0)
++end
++
++local function autostart_staged()
++  local frame = read_all(BOOT_FRAME)
++  local rc = read_all(CHAOS_RC)
++  local cur = read_all(RC_PATH)
++  local hop = type(cur) == "string" and cur:find(RC_HOP, 1, true) ~= nil
++  return frame == build_boot_frame() and type(rc) == "string" and #rc > 0 and hop
++end
++
++local function autostart_install()
++  exec("mkdir -p " .. DATA_DIR)
++  local frame = build_boot_frame()
++  local ok, err = write_file(BOOT_FRAME, frame)
++  if not ok then return false, err end
++  ok, err = write_file(CHAOS_RC, build_chaos_rc())
++  if not ok then return false, err end
++  -- 往 /data/rc 末尾补二跳。**幂等**: 已经有那一行就不再追加(重复追加会被执行两次)。
++  -- 注意 /data/rc 可能已经被上游平台占用 —— 只追加一行, 绝不整体覆盖。
++  local cur = read_all(RC_PATH)
++  if type(cur) ~= "string" then cur = "" end
++  if not cur:find(RC_HOP, 1, true) then
++    local f = io.open(RC_PATH, "a")
++    if not f then return false, "打不开 " .. RC_PATH end
++    local wok = pcall(f.write, f, RC_HOP .. "\n")
++    local cok = pcall(f.close, f)
++    if not wok or not cok then return false, "追加 " .. RC_PATH .. " 失败" end
++  end
++  if not autostart_staged() then return false, "落盘核对不过" end
++  return true
++end
++
++-- 只摘掉我们自己那一行, 不动 /data/rc 里别人的内容。
++local function autostart_strip()
++  local cur = read_all(RC_PATH)
++  if type(cur) ~= "string" or #cur == 0 then return true end
++  if not cur:find(RC_HOP, 1, true) then return true end
++  local scan = cur
++  if scan:sub(-1) ~= "\n" then scan = scan .. "\n" end
++  local keep = {}
++  for line in scan:gmatch("([^\n]*)\n") do
++    if line:gsub("%s+$", "") ~= RC_HOP then keep[#keep + 1] = line end
++  end
++  local out = table.concat(keep, "\n")
++  if #out > 0 then out = out .. "\n" end
++  return write_file(RC_PATH, out)
++end
++
++local function autostart_flag(on)
++  if on then return write_file(FLAG_ON, "on\n") end
++  exec("rm -f " .. FLAG_ON)
++  return read_all(FLAG_ON) == nil
++end
++
++-- 状态行文本。**只出单行且不设 width** —— 本设备实测"给 Label 设宽度 + text_align"
++-- 那套写法不生效(表现为左对齐、整体不居中), 居中只有"不设宽度 + align 表"这一条有证据的路。
++local function autostart_state_text()
++  local armed = read_all(FLAG_ON) ~= nil
++  local rc = read_all(CHAOS_RC)
++  return "开关:" .. (armed and "ON" or "OFF")
++    .. "  文件:" .. (autostart_staged() and "就位" or "缺")
++    .. "  rc:" .. (type(rc) == "string" and (tostring(#rc) .. "B") or "无")
++    .. "  延:" .. AUTOSTART_DELAY .. "+" .. SAFETY_WAIT_S
++end
++
+ local function status_words(raw)
+   if type(raw) ~= "string" or #raw ~= STATUS_SIZE then return nil end
+   local words = {}
+@@ -399,6 +536,7 @@
+   outline_width = 0, border_width = 0, pad_all = 0,
+   bg_opa = lvgl.OPA(100), bg_color = V_DEEP,
+ })
++root:clear_flag(lvgl.FLAG.SCROLLABLE)
+ -- 重要(实测): LVGL 对象默认带 SCROLLABLE, 会把手势吃掉 —— 表现就是
+ -- **长按表盘进不了表盘选择页**(主包与投递包都一样)。凡是本脚本创建的容器对象,
+ -- 一律清掉 SCROLLABLE; 需要点击的再单独加 CLICKABLE。
+@@ -406,25 +544,59 @@
+ -- 只清 SCROLLABLE **不够**(清完长按仍然进不了表盘选择页) —— 还要 add_flag(EVENT_BUBBLE)。
+ -- EVENT_BUBBLE 让触摸事件**冒泡给父层**(固件的表盘容器), 系统的长按手势才收得到;
+ -- 固件自带表盘用的也是 CLICKABLE + EVENT_BUBBLE 这两句。
+--- root 自己也加 CLICKABLE: 空白处按下时得有个接收者, 否则事件无处可冒。
+ root:add_flag(lvgl.FLAG.CLICKABLE)
+ root:add_flag(lvgl.FLAG.EVENT_BUBBLE)
+ 
++-- ===== 两个视图(主视图 / 自启动页) =====
++-- 自启动的操作单独一页(与同机那个平台的排布一致), 主视图只留一个入口。
++-- 切页用 align 的 y_ofs 位移, **不用 hidden 标志**: 位移是纯布局, 不依赖任何在本设备上
++-- 没验证过的属性; 被移出屏幕的视图 LVGL 自己就不画了。
++local OFF_Y = 3000
++local main_view = lvgl.Object(root, {
++  w = SCR_W, h = SCR_H, bg_opa = lvgl.OPA(100), bg_color = V_DEEP,
++  align = { type = lvgl.ALIGN.CENTER, x_ofs = 0, y_ofs = 0 },
++})
++local as_view = lvgl.Object(root, {
++  w = SCR_W, h = SCR_H, bg_opa = lvgl.OPA(100), bg_color = V_DEEP,
++  align = { type = lvgl.ALIGN.CENTER, x_ofs = 0, y_ofs = OFF_Y },
++})
++-- 视图容器同样要清 SCROLLABLE + 加 CLICKABLE/EVENT_BUBBLE:
++-- 否则长按手势会被这一层吃掉, 自启动页上尤其明显(它整页都是按钮)。
++local views = { main_view, as_view }
++for i = 1, #views do
++  views[i]:clear_flag(lvgl.FLAG.SCROLLABLE)
++  views[i]:add_flag(lvgl.FLAG.CLICKABLE)
++  views[i]:add_flag(lvgl.FLAG.EVENT_BUBBLE)
++end
++local function view_show(name)
++  local top = name == "as" and as_view or main_view
++  local off = name == "as" and main_view or as_view
++  top:set { align = { type = lvgl.ALIGN.CENTER, x_ofs = 0, y_ofs = 0 } }
++  off:set { align = { type = lvgl.ALIGN.CENTER, x_ofs = 0, y_ofs = OFF_Y } }
++end
++
++-- 自启动页的状态行先做前置声明: 主视图那个入口按钮要用它刷新, 而它在后面才建。
++-- (写成 `local function` 会捕获 nil —— 闭包只认"声明在自己之前"的局部量。)
++local as_label
++local function as_set(text, color)
++  if as_label then as_label:set { text = tostring(text), text_color = color or V_TXT2 } end
++end
++
+ -- 标题: 一个 Label 说完, 字号与颜色建立层级(不用衬线, 原因见上面 F_BODY 的说明)
+-lvgl.Label(root, {
++lvgl.Label(main_view, {
+   text = "Chaos 安装器",
+   text_color = V_TXT,
+-  text_font = lvgl.Font(F_BODY, 40),
+-  align = { type = lvgl.ALIGN.CENTER, x_ofs = 0, y_ofs = -170 },
++  text_font = lvgl.Font(F_BODY, 32),
++  align = { type = lvgl.ALIGN.CENTER, x_ofs = 0, y_ofs = -198 },
+ })
+ 
+ -- 状态卡片: 中间灰 + 1px 边框 + 圆角走 V_R(卡片里不再套卡片); 状态文字在卡片内居中
+-local card = lvgl.Object(root, {
+-  w = SCR_W - 32, h = 150,
++local card = lvgl.Object(main_view, {
++  w = SCR_W - 32, h = 94,
+   bg_opa = lvgl.OPA(100), bg_color = V_MID,
+   border_width = 1, border_color = V_LINE2,
+   radius = V_R, pad_all = 0,
+-  align = { type = lvgl.ALIGN.CENTER, x_ofs = 0, y_ofs = -20 },
++  align = { type = lvgl.ALIGN.CENTER, x_ofs = 0, y_ofs = -126 },
+ })
+ card:clear_flag(lvgl.FLAG.SCROLLABLE)
+ card:add_flag(lvgl.FLAG.EVENT_BUBBLE)
+@@ -448,9 +620,9 @@
+   ghost   = { bg = V_DEEP,   line = V_LINE2,  fg = V_TXT2, opa = 100, bw = 1 },
+ }
+ 
+-local function make_button(text, y_ofs, kind, on_clicked)
++local function make_button(parent, text, y_ofs, kind, on_clicked)
+   local style = BUTTON_STYLES[kind] or BUTTON_STYLES.ghost
+-  local b = lvgl.Object(root, {
++  local b = lvgl.Object(parent, {
+     w = SCR_W - 32, h = 64,
+     bg_opa = lvgl.OPA(style.opa),
+     bg_color = style.bg,
+@@ -475,7 +647,7 @@
+ local run_button
+ detect_language()
+ 
+-run_button = make_button("运行", 110, "primary", function()
++run_button = make_button(main_view, "运行", 6, "primary", function()
+   if runner then set_status("正在运行"); return end
+   if started_once then set_status("每次开机只能运行一次", V_WARN); return end
+   if module_loaded() then
+@@ -488,10 +660,66 @@
+   if not started then set_status("运行失败: " .. tostring(err), V_ERR) end
+ end)
+ 
+-make_button("清除重置", 186, "danger", function()
++make_button(main_view, "自启动", 80, "ghost", function()
++  as_set(autostart_state_text(), V_TXT2)
++  view_show("as")
++end)
++
++make_button(main_view, "清除重置", 154, "danger", function()
+   if runner then set_status("运行中, 请等待", V_WARN); return end
+   if not wipe_armed then wipe_armed = true; set_status("再按一次以确认清除", V_WARN); return end
+   wipe_armed = false
++  -- 顺序: 先把 /data/rc 里属于我们的那行摘掉, 再删数据目录。
++  -- autostart_strip 只删我们自己那一行, 不动 /data/rc 里别人(上游平台)的内容。
++  autostart_strip()
++  autostart_flag(false)
+   exec("rm -rf " .. DATA_DIR)
+   set_status("已清除, 重启后重新运行", V_OK)
+ end)
++
++-- ===== 自启动页 =====
++lvgl.Label(as_view, {
++  text = "自启动",
++  text_color = V_TXT,
++  text_font = lvgl.Font(F_BODY, 32),
++  align = { type = lvgl.ALIGN.CENTER, x_ofs = 0, y_ofs = -198 },
++})
++-- 状态行: 单行短文本, 不设 width —— 与上面同一条实测理由(不设宽度才会按文字居中)。
++as_label = lvgl.Label(as_view, {
++  text = "",
++  text_color = V_TXT2,
++  text_font = lvgl.Font(F_BODY, 18),
++  align = { type = lvgl.ALIGN.CENTER, x_ofs = 0, y_ofs = -152 },
++})
++
++make_button(as_view, "装自启文件", -66, "ghost", function()
++  if runner then as_set("正在运行, 请等待", V_WARN); return end
++  local ok, err = autostart_install()
++  if ok then
++    as_set("已落盘: boot.bin + rc + rc 二跳", V_OK)
++  else
++    as_set("失败: " .. tostring(err), V_ERR)
++  end
++end)
++
++make_button(as_view, "开自启动", 8, "primary", function()
++  if not autostart_staged() then as_set("先按「装自启文件」", V_WARN); return end
++  if autostart_flag(true) then
++    as_set("自启动【开】 下次开机自动注册", V_OK)
++  else
++    as_set("写开关失败", V_ERR)
++  end
++end)
++
++make_button(as_view, "关自启动", 82, "ghost", function()
++  if autostart_flag(false) then
++    as_set("自启动【关】 下次开机不注册", V_WARN)
++  else
++    as_set("删开关失败", V_ERR)
++  end
++end)
++
++make_button(as_view, "< 返回", 156, "ghost", function()
++  as_set(autostart_state_text(), V_TXT2)
++  view_show("main")
++end)

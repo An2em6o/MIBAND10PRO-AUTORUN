@@ -1,0 +1,17 @@
+# ============================================================
+#  本仓存在「逐字节一致」强判据：
+#    · modules/shellpp2-autorun/_Lua/main.lua ≡ resources/_lua/_Lua/main.lua
+#    · 包内 main.lua == 工程 main.lua（pack_mwz.py 会核）
+#    · 离线门对脚本正文逐字节比对
+#    · 设备侧 nsh 按字节读脚本 / 块设备
+#  ⇒ 禁止 Git 做任何行尾 / 编码转换。字节必须原样进出。
+# ============================================================
+* -text
+
+# 二进制资源（同时让 GitHub 不做文本 diff）
+*.bin   binary
+*.ko    binary
+*.face  binary
+*.mwz   binary
+*.png   binary
+*.rmeta binary

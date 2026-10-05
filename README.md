@@ -2,6 +2,9 @@
 
 小米手环 10 Pro 原生模块开机自启动工程：一套管理器 + 三个原生模块（Shell++ II / Chaos / Canopus）的接入与安装器。
 
+> **只是想用？** 直接看 **[`docs/USAGE.md`](docs/USAGE.md)** —— 面向普通用户的中文教程（不用编程、全程在手表上手点，以 Chaos 模块为例）：装自启动 → 装模块自启动 → 日常管理 → 重建 → 卸载 → 故障急救。
+> 下面是给开发者/维护者的工程说明。
+
 ## 支持设备
 
 | 机型 | 固件 |
@@ -69,6 +72,8 @@ lua -e "assert(loadfile('Watchface/module.autorun.canopus/_Lua/main.lua'))"
 ```
 
 各模块细节见 `modules/<名>/README.md`，设计与历史分析见 [`docs/`](docs/)。
+
+**教程**：[`docs/USAGE.md`](docs/USAGE.md) —— 普通用户使用教程（装自启动 / 装模块自启动 / 管理 / 重建 / 卸载 / 故障判读）。
 
 ## 许可
 

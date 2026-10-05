@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "symbol_id": "xiaomi-band-10-pro-3.101.043.lv_timer_set_period",
+  "target_id": "xiaomi-band-10-pro-3.101.043",
+  "name": "lv_timer_set_period",
+  "kind": "function",
+  "instruction_set": "thumb",
+  "prototype": "void(void *, uint32_t)",
+  "proof": {
+    "static": "confirmed",
+    "device": "probed_externally",
+    "evidence_ids": [
+      "EVID-MATCH-001",
+      "EVID-FW-MATCH-ENSEMBLE-1036-1043",
+      "EVID-CHAOS-DQ-DEVICE-001"
+    ]
+  },
+  "policy": "restricted",
+  "status": "STATIC_RECOVERED",
+  "provenance": {
+    "firmware_sha256": "519307675665e4866d722a8119a98589c397b614ac3294cb87bfc86de45756ec",
+    "source": "same-image cross-project recovery: the Chaos-Module analysis (MIBAND10PRO-AUTORUN ANALYSIS.md §3 / AUTOSTART-GUIDE.md §8, fw_api/event.rs:39-42) recovered lv_timer_set_period at 0xc16d545 from the identical vela_ap.bin (13,795,728 B, sha256 5193...56ec, p67tc 3.101.043 = Band 10 Pro). Same-image identity is proven by the independent address match of lv_timer_create: the Chaos thunk 0x0C587ED1 equals this pack's approved lv_timer_create record (0xc587ed1). Period is written at lv_timer_t+0x00.",
+    "evidence_ids": [
+      "EVID-MATCH-001",
+      "EVID-FW-MATCH-ENSEMBLE-1036-1043",
+      "EVID-CHAOS-DQ-DEVICE-001"
+    ]
+  },
+  "entry_address": "0xc16d544",
+  "callable_address": "0xc16d545",
+  "notes": "restricted (not exported into the generated veneer; the boot-autorun DQ calls it via an exact-address build define). Device-probed externally: the Chaos supervisor DQ ran this address on a real p67tc 3.101.043 device (cold-boot gate G2 3/3, DQ state=5), proving both reachability and the lv_timer_t+0x00 period layout on this exact image. Not probed inside a Canopus supervisor build yet - keep the first-call observation as a G1' gate item.",
+  "approval_state": "APPROVED"
+}

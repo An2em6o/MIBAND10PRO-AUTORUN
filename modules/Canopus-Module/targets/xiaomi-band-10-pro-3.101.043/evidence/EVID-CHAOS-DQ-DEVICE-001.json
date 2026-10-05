@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "evidence_id": "EVID-CHAOS-DQ-DEVICE-001",
+  "target_id": "xiaomi-band-10-pro-3.101.043",
+  "question": "Is lv_timer_set_period at 0xc16d545 a real, callable LVGL timer primitive on this exact firmware image, and is the period stored at lv_timer_t+0x00?",
+  "candidate_symbols": [
+    "xiaomi-band-10-pro-3.101.043.lv_timer_set_period"
+  ],
+  "prototype_hypothesis": "void lv_timer_set_period(lv_timer_t *timer, uint32_t period): writes the new period into lv_timer_t+0x00 and returns; no allocation, no callback invocation.",
+  "callsite_evidence": [
+    "Chaos-Module supervisor (same-image analysis, MIBAND10PRO-AUTORUN/ANALYSIS.md §3 address cross-check table) recovered lv_timer_set_period at 0x0C16D545 in its fw_api/event.rs:39-42 wrapper, alongside the lv_timer_create thunk 0x0C587ED1.",
+    "Same-image identity is established by the independent address match: the Chaos lv_timer_create thunk 0x0C587ED1 is bit-identical to this target pack's approved lv_timer_create record (0xc587ed1, EVID-MATCH-001 / EVID-FW-MATCH-ENSEMBLE-1036-1043), so both projects analyzed the same vela_ap.bin (13,795,728 B, sha256 5193...56ec).",
+    "Shell++ II independently recovered lv_timer_create's body at 0x0C16D475 (+1 Thumb bit vs the 0x0C16D474 base), placing the timer family inside the same 0x0C16D4xx neighborhood as 0xc16d545."
+  ],
+  "control_flow_evidence": [
+    "AUTOSTART.md/AUTOSTART-GUIDE.md (2026-10-04) device run: the Chaos supervisor DQ built its boot timer from the sh/write context with lv_timer_create and downshifted it with lv_timer_set_period after the sequence; the on-device cold-boot gate G2 passed 3/3 with DQ results state=5, so both primitives executed successfully on real hardware.",
+    "Period-at-offset-0 layout is asserted by the Chaos analysis (AUTOSTART-GUIDE.md §8: 周期在 lv_timer_t+0x00) and is consistent with the LVGL v9 timer header layout."
+  ],
+  "ownership_analysis": "The timer object is created and owned by the caller module; set_period only mutates the caller-owned timer header. Firmware-owned state is not touched.",
+  "unsafe_assumptions": [
+    "The device probe was performed inside the Chaos supervisor build, not yet inside a Canopus supervisor build; the first Canopus-side call remains a G1' observation item.",
+    "Static identity is cross-project (same image), not from this pack's own 3.101.043 IDB ensemble; a future IDB pass should confirm the function shape directly."
+  ],
+  "recommended_probe": "On the first DQ-bearing Canopus supervisor build, verify via status readback that the DQ sequence completes (pending_state=COMPLETED) and that a later idle tick keeps the device stable, which exercises set_period on this image from Canopus code.",
+  "reviewers": [
+    "canopus-maintainer"
+  ],
+  "verdict": "STATIC_RECOVERED",
+  "created": "2026-10-05T00:00:00Z",
+  "artifacts": [
+    {
+      "uri": "ida://vela_ap.bin.i64 sub_C16D544",
+      "role": "lv_timer_set_period body (Chaos-Module same-image recovery)"
+    },
+    {
+      "uri": "file://MIBAND10PRO-AUTORUN/AUTOSTART-GUIDE.md",
+      "role": "device-probe record for the DQ timer primitives on p67tc 3.101.043"
+    }
+  ]
+}

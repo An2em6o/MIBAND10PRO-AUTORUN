@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "symbol_id": "xiaomi-band-10-pro-3.101.043.bt_get_pairing_state",
+  "target_id": "xiaomi-band-10-pro-3.101.043",
+  "name": "bt_get_pairing_state",
+  "kind": "function",
+  "instruction_set": "thumb",
+  "entry_address": "0xc3b60a0",
+  "callable_address": "0xc3b60a1",
+  "prototype": "uint32(const uint8_t *, uint32_t)",
+  "calling_convention": "arm-aapcs",
+  "contexts": {
+    "allowed": [
+      "native_module_bluetooth_client"
+    ],
+    "blocking": false
+  },
+  "proof": {
+    "static": "confirmed",
+    "evidence_ids": [
+      "EVID-BT-1043-BOND-STATE-001",
+      "EVID-FW-MATCH-ENSEMBLE-1036-1043"
+    ],
+    "device": "not_probed"
+  },
+  "policy": "native-full-trust",
+  "status": "STATIC_RECOVERED",
+  "provenance": {
+    "firmware_sha256": "519307675665e4866d722a8119a98589c397b614ac3294cb87bfc86de45756ec",
+    "evidence_ids": [
+      "EVID-BT-1043-BOND-STATE-001",
+      "EVID-FW-MATCH-ENSEMBLE-1036-1043"
+    ],
+    "source": "exact 3.101.043 IDB vela_ap.bin.i64; IDA shape review of the exact-state accessor and stock bond create/remove callers"
+  },
+  "approval_state": "APPROVED",
+  "notes": "Exact 3.101.043 IDA recovery: 0x0C3B60A0/0x0C3B60A1 returns record + 0xAC, matching the 3.101.036 exact-state accessor and the state read used by bt_create_bond_private/bt_remove_bond_private. The previous 0x0C3B5F78 candidate returns record[0xAB] > 3 and is not the transport-specific pairing-state byte. Device behavior remains unprobed."
+}

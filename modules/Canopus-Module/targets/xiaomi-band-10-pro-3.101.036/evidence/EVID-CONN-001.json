@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "evidence_id": "EVID-CONN-001",
+  "target_id": "xiaomi-band-10-pro-3.101.036",
+  "question": "Which exact-target firmware functions implement named interconnect and the direct THIRDPARTY_APP watch-to-phone submission path?",
+  "candidate_symbols": [
+    "xiaomi-band-10-pro-3.101.036.miwear.interconnect_connect",
+    "xiaomi-band-10-pro-3.101.036.miwear.interconnect_send",
+    "xiaomi-band-10-pro-3.101.036.miwear.interconnect_close",
+    "xiaomi-band-10-pro-3.101.036.miwear.interconnect_loop",
+    "xiaomi-band-10-pro-3.101.036.miwear.thirdparty_submit_message_content",
+    "xiaomi-band-10-pro-3.101.036.miwear.quickapp_register_app"
+  ],
+  "prototype_hypothesis": "interconnect_connect(loop, conn, name, cb) registers a named client; interconnect_send(conn, ignored_name, msg, done, arg) queues named-transport data; thirdparty_submit_message_content(content) synchronously accepts a caller-built 336-byte THIRDPARTY_APP envelope without repeating wearable appinfo lookup; quickapp_register_app is a full quick-app lifecycle operation, not routing-only registration.",
+  "callsite_evidence": [
+    "sub_C2D20F4 copies name into a 64-byte slot, stores cb at conn+4 and the node at conn[0], and connects to hard-coded miwear-server via sub_C2CB8E8",
+    "sub_C2D2184 dispatches conn[8]==0 to sub_C2D1E3C with caller-owned conn and intentionally ignores the public name argument, matching stock AIOTJS sub_C887D24",
+    "sub_C2D1A0C invokes send completion as (conn, status, msg, arg); sub_C2D2198 queues teardown",
+    "sub_C526AD0 server event 4 passes the named client to sub_C528FD0, which calls sub_C5294B4 and returns before building phone status if wearable quick-app appinfo is absent",
+    "sub_C528F00 quickapp_send_wearmsg also calls sub_C5294B4 before constructing its message, proving named proxy routing is gated by the wearable quick-app registry",
+    "after that lookup, sub_C528F00 zeroes exactly 336 bytes, writes message_id 0x160914, kind 9, package pointer at +0x10, fingerprint blob pointer at +0x14, and u16-length-prefixed payload pointer at +0x18",
+    "sub_C528F00 calls sub_CA8B164 with the envelope, then frees its temporary payload immediately after return, proving synchronous borrowing",
+    "sub_CA8B164 returns -22 for null, embeds a non-null envelope in a dispatch descriptor, invokes loc_CA8ACC4, and returns 0; it performs no appinfo lookup",
+    "sub_C527E38 full quick-app registration additionally creates app/page descriptors, changes launcher state, and emits registration notifications"
+  ],
+  "control_flow_evidence": [
+    "named client connect -> server event 4 -> sub_C528FD0 -> sub_C5294B4 is the gate that prevents non-installed native package names from reaching the phone",
+    "stock outbound path is sub_C528F00 -> sub_CA8B164 -> loc_CA8ACC4; calling sub_CA8B164 with the same envelope bypasses only the earlier appinfo lookup, not the lower miwear serializer/transport",
+    "sub_C887748 treats only proxy event 5 as named-client ready; event 1 is merely internal transport handshake",
+    "the observed wearable app list contains neither com.xiaomi.miwear.interconnect nor com.canopus.lyra-player, matching the absence of phone-side THIRDPARTY_APP packets",
+    "phone routing uses BasicInfo.package_name; a NULL fingerprint pointer encodes an omitted optional fingerprint rather than a present empty byte string"
+  ],
+  "ownership_analysis": "Named conn storage is caller-owned for link lifetime and named-send messages live until completion. Direct-submit envelope, package string, optional fingerprint blob, and payload blob are caller-owned but only need to remain valid until thirdparty_submit_message_content returns; stock frees payload immediately afterward.",
+  "unsafe_assumptions": [
+    "STATIC_RECOVERED: exact signatures and layouts recovered from IDA; device probe pending",
+    "direct submit return 0 means synchronous acceptance into the lower dispatcher, not confirmed phone or plugin delivery",
+    "phone-to-watch reply delivery through the retained named receive connection still requires a device probe",
+    "NULL fingerprint omission is statically aligned with nanopb optional-field semantics and AstroBox encoding, but end-to-end acceptance remains probe-pending"
+  ],
+  "recommended_probe": "Use direct submit with package com.xiaomi.miwear.interconnect, NULL fingerprint, and a protocol-tagged payload; verify AstroBox core logs THIRDPARTY_APP MessageContent and plugin delivery, then verify the reply reaches the retained named receive callback.",
+  "reviewers": ["canopus-maintainer"],
+  "verdict": "STATIC_RECOVERED",
+  "created": "2026-08-10T00:00:00Z",
+  "artifacts": [
+    { "uri": "ida://vela_ap.bin.i64 sub_C2D20F4", "role": "named connect" },
+    { "uri": "ida://vela_ap.bin.i64 sub_C2D2184 -> sub_C2D1E3C", "role": "named client send" },
+    { "uri": "ida://vela_ap.bin.i64 sub_C526AD0 -> sub_C528FD0 -> sub_C5294B4", "role": "named-client appinfo gate" },
+    { "uri": "ida://vela_ap.bin.i64 sub_C528F00", "role": "stock THIRDPARTY_APP envelope builder" },
+    { "uri": "ida://vela_ap.bin.i64 sub_CA8B164", "role": "direct message-content submit" },
+    { "uri": "ida://vela_ap.bin.i64 sub_C527E38", "role": "full quick-app registration" }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "symbol_id": "xiaomi-band-10-pro-3.101.043.btsnoop_avdtp_recognizer",
+  "target_id": "xiaomi-band-10-pro-3.101.043",
+  "name": "btsnoop_avdtp_recognizer",
+  "kind": "function",
+  "instruction_set": "thumb",
+  "prototype": "withdrawn",
+  "proof": {
+    "static": "candidate",
+    "device": "not_probed",
+    "evidence_ids": [
+      "EVID-BT-1043-MISC-002"
+    ]
+  },
+  "policy": "withdrawn",
+  "status": "WITHDRAWN",
+  "provenance": {
+    "firmware_sha256": "519307675665e4866d722a8119a98589c397b614ac3294cb87bfc86de45756ec",
+    "source": "exact 3.101.043 IDB vela_ap.bin.i64; HCI packet switch, ACL registry flow, filter strings, and downstream protocol branches",
+    "withdrawal_reason": "sub_C3C33D8 is the broad btsnoop_filter packet entry; AVDTP recognition occurs only in a downstream branch and does not establish the recorded standalone symbol identity.",
+    "evidence_ids": [
+      "EVID-BT-1043-MISC-002"
+    ]
+  },
+  "notes": "The corpus-derived identity and direct-call contract are refuted; no replacement standalone AVDTP recognizer is exposed.",
+  "approval_state": "REJECTED"
+}

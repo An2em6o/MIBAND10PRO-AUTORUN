@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "symbol_id": "xiaomi-band-10-pro-3.101.043.open",
+  "target_id": "xiaomi-band-10-pro-3.101.043",
+  "name": "open",
+  "kind": "function",
+  "instruction_set": "thumb",
+  "prototype": "int(const char *, int, ...)",
+  "proof": {
+    "static": "confirmed",
+    "evidence_ids": [
+      "EVID-IO-1043-001",
+      "EVID-FW-MATCH-ENSEMBLE-1036-1043"
+    ],
+    "device": "not_probed"
+  },
+  "policy": "native-full-trust",
+  "status": "STATIC_RECOVERED",
+  "provenance": {
+    "firmware_sha256": "519307675665e4866d722a8119a98589c397b614ac3294cb87bfc86de45756ec",
+    "source": "exact 3.101.043 IDB vela_ap.bin.i64; exact NuttX implementation and stock callsite ABI review",
+    "evidence_ids": [
+      "EVID-IO-1043-001",
+      "EVID-FW-MATCH-ENSEMBLE-1036-1043"
+    ]
+  },
+  "entry_address": "0xc1d0a28",
+  "callable_address": "0xc1d0a29",
+  "notes": "Exact 3.101.043 NuttX public open implementation. The entry saves R1-R3, constructs a va_list, and forwards it to the internal open path; callers that set O_CREAT must provide the mode argument. Address refreshed by trusted-036 caller-neighborhood ensemble v2; semantic policy retained from the curated 043 record. Address refreshed by trusted-036 caller-neighborhood ensemble v2; semantic policy retained from the curated 043 record.",
+  "approval_state": "APPROVED"
+}

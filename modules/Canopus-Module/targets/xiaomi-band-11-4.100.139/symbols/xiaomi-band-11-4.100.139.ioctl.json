@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "symbol_id": "xiaomi-band-11-4.100.139.ioctl",
+  "target_id": "xiaomi-band-11-4.100.139",
+  "name": "ioctl",
+  "kind": "function",
+  "instruction_set": "thumb",
+  "entry_address": "0xc341e38",
+  "callable_address": "0xc341e39",
+  "prototype": "int(int, uint32_t, ...)",
+  "calling_convention": "arm-aapcs",
+  "contexts": {
+    "allowed": [
+      "target-private-thread"
+    ],
+    "blocking": true
+  },
+  "ownership": {
+    "argument": "borrowed fd and ioctl argument",
+    "return_value": "status"
+  },
+  "side_effects": [
+    "dispatches fd-level ioctl"
+  ],
+  "proof": {
+    "static": "recovered",
+    "device": "not_probed",
+    "evidence_ids": [
+      "EVID-BLUETOOTH-4139-006"
+    ]
+  },
+  "policy": "restricted",
+  "status": "STATIC_RECOVERED",
+  "provenance": {
+    "firmware_sha256": "31ce82257f7c127950dc5070b86316730cf468a41f0d004559e41e7d923b2c74",
+    "evidence_ids": [
+      "EVID-BLUETOOTH-4139-006"
+    ],
+    "source": "Exact .139 IDA callsite/Thumb audit; typed semantic adapter in target-private. See evidence for scope."
+  },
+  "notes": "Private Band 11 runtime binding. ABI is adapted per target; public approval remains PENDING. Radio/physical display validation requires a device. See EVID-BLUETOOTH-4139-006.",
+  "approval_state": "PENDING"
+}

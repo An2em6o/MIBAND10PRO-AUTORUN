@@ -1,0 +1,124 @@
+-- Exact q66cn .139 bootstrap. No firmware cave and no global MPU disable.
+local M = {}
+local retained_owner -- keep the closed upvalue reachable until NSH exec returns
+local function pointer(value)
+    local text = tostring(value)
+    return tonumber(text:match("0[xX](%x+)$") or text:match(":%s*(%x+)$"), 16)
+end
+local function crc32(data)
+    local crc = 0xffffffff
+    for i = 1, #data do
+        crc = crc ~ data:byte(i)
+        for _ = 1, 8 do crc = (crc >> 1) ~ (0xedb88320 & -(crc & 1)) end
+    end
+    return (~crc) & 0xffffffff
+end
+local function retain(value) return function() return value end end
+function M.load(profile, stage1_path, stage2_path, supervisor_path, run, read_all, write_all, progress)
+    progress = progress or function() end
+    local function check(ok, message) if not ok then error(message, 0) end end
+    local function work()
+        check(type(debug.upvalueid) == "function", "debug.upvalueid unavailable")
+        progress("读取第一阶段加载器")
+        local stage1 = read_all(stage1_path)
+        progress("读取第二阶段加载器")
+        local stage2 = read_all(stage2_path)
+        progress("读取 Supervisor")
+        local supervisor = read_all(supervisor_path)
+        for _, item in ipairs({{stage1,"stage1"},{stage2,"stage2"},{supervisor,"supervisor"}}) do
+            progress("校验资源：" .. item[2])
+            check(type(item[1]) == "string" and #item[1] == profile[item[2] .. "_size"]
+                and crc32(item[1]) == profile[item[2] .. "_crc"], item[2] .. " resource mismatch")
+        end
+        progress("准备安装目录")
+        run("mkdir /data/canopus")
+        progress("写入第二阶段加载器")
+        check(write_all("/data/canopus/stage2.bin", stage2), "stage2 write failed")
+        progress("回读校验第二阶段加载器")
+        check(read_all("/data/canopus/stage2.bin") == stage2, "stage2 write verification failed")
+        progress("写入 Supervisor")
+        check(write_all("/data/canopus/supervisor.elf", supervisor), "Supervisor write failed")
+        progress("回读校验 Supervisor")
+        check(read_all("/data/canopus/supervisor.elf") == supervisor, "Supervisor write verification failed")
+        local function read_word(address)
+            check(type(address) == "number" and address % 4 == 0, "unaligned memory read")
+            local path = "/data/canopus/bootstrap-word.txt"
+            check(run(string.format("mw %08x 4 > %s", address, path)), "memory read failed")
+            local text = read_all(path, "r") or ""
+            local value = text:match("=%s*0[xX](%x+)") or text:match("%-%>%s*0[xX](%x+)")
+            value = value and tonumber(value, 16)
+            check(value ~= nil and value <= 0xffffffff, "invalid memory read response")
+            return value
+        end
+        local function write_word(address, value)
+            check(run(string.format("mw %08x=%08x", address, value)), "memory write failed")
+        end
+        progress("检查 MPU 权限和可用区域")
+        check(read_word(0xe000ed94) == 5, "unexpected MPU control; reboot with stock firmware")
+        check(read_word(0xe000edc0) == 0x00447722, "unexpected MPU memory attributes")
+        check((read_word(profile.mpu_bitmap) & 0x7f) == 0x0f, "MPU leases already occupied; reboot")
+        for index, fingerprint in ipairs(profile.fingerprints) do
+            progress(string.format("核对固件指令 %d/%d", index, #profile.fingerprints))
+            check(read_word(fingerprint[1]) == fingerprint[2], "firmware instruction fingerprint mismatch")
+        end
+        progress("核对运行内存范围")
+        local heap = read_word(profile.umem_slot)
+        check(heap == profile.umem_descriptor, "unexpected Umem heap descriptor")
+        local lo, hi = read_word(heap + 0x1c), read_word(heap + 0x20)
+        check(lo >= 0x3c000000 and hi > lo and hi <= 0x3d000000, "unexpected PSRAM heap bounds")
+        local function owned_range(p, n)
+            return type(p) == "number" and p % 4 == 0 and p > lo and p + n <= hi
+        end
+        -- A fresh, non-interned long string. The only patched bytes are the
+        -- result word and stage1's mailbox parameter, both in its own payload.
+        progress("准备加载器内存与参数")
+        retained_owner = retain(string.pack("<I4", 0x7ffffffe) .. string.rep("\0", 28) .. stage1 .. string.rep("\0", 32))
+        local upvalue = pointer(debug.upvalueid(retained_owner, 1))
+        check(owned_range(upvalue, 32), "upvalue is outside Umem")
+        local value = read_word(upvalue + 8)
+        check(value == upvalue + 16 and (read_word(value + 8) & 0xff) == 0x54, "unexpected closed long-string upvalue layout")
+        local object = read_word(value)
+        local length = #retained_owner()
+        check(owned_range(object, length + 17), "string is outside Umem")
+        check((read_word(object + 4) & 0xff) == 0x14 and read_word(object + 12) == length,
+            "unexpected TString layout")
+        local mailbox, code = object + 16, object + 48
+        check(read_word(mailbox) == 0x7ffffffe and read_word(code) == string.unpack("<I4", stage1), "owned payload mismatch")
+        write_word(code + 4, mailbox)
+        check(read_word(code + 4) == mailbox, "mailbox parameter write failed")
+        -- Startup 0x0c0c024c proves 3c... data <-> 1c... instruction alias.
+        -- MPU CTRL=5 preserves the privileged default Code map at 1c... .
+        -- No RNR/RBAR/RLAR writes occur from Lua. Native leases are atomic.
+        local executable = code - 0x20000000
+        progress("同步缓存并启动原生加载器\n此步骤完成前请保持页面打开")
+        check((read_word(0x07ffa000) & 1) == 1 and (read_word(0x07ffc000) & 1) == 1, "unexpected BES cache state")
+        -- Fixed leaf entries in this exact firmware establish their own
+        -- arguments: D clean-all; then the already-enabled I cache's
+        -- clean/invalidate-all branch. Avoid mw on cache command ports:
+        -- cmd_mw reads those ports before and after every write.
+        check(run(string.format("exec 0x%08x", profile.cache_d_clean)), "data-cache clean failed")
+        check(run(string.format("exec 0x%08x", profile.cache_barrier)), "cache clean barrier failed")
+        check(run(string.format("exec 0x%08x", profile.cache_i_invalidate)), "instruction-cache invalidation failed")
+        check(run(string.format("exec 0x%08x", profile.cache_barrier)), "instruction-cache barrier failed")
+        -- Run command status is not the native return code; read the owned
+        -- mailbox after exec, even if NSH returns a command error.
+        local command_ok = run(string.format("exec 0x%08x > /data/canopus/bootstrap-exec.txt", executable | 1))
+        progress("读取原生加载结果")
+        local result = read_word(mailbox)
+        if result >= 0x80000000 then result = result - 0x100000000 end
+        progress("保存加载诊断结果")
+        write_all("/data/canopus/bootstrap-result.txt", string.format("target=%s\nresult=%d\nexec_ok=%s\n", profile.target_id, result, tostring(command_ok)))
+        progress("确认原生加载结果")
+        check(result == 0, "native loader rc=" .. result)
+        check(command_ok, "NSH exec did not complete successfully")
+        return true
+    end
+    local ok, result = pcall(work)
+    retained_owner = nil -- exec is synchronous; no native callback retains it
+    return ok and result == true, ok and nil or tostring(result)
+end
+M.crc32 = crc32
+-- Called only after cancelling a suspended UI task; synchronous exec cannot
+-- overlap a Lua UI callback, so no native call can still use this owner.
+function M.release() retained_owner = nil end
+return M

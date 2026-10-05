@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "symbol_id": "xiaomi-band-10-pro-3.101.043.driver_open_dispatch",
+  "target_id": "xiaomi-band-10-pro-3.101.043",
+  "name": "driver_open_dispatch",
+  "kind": "function",
+  "instruction_set": "thumb",
+  "prototype": "withdrawn",
+  "proof": {
+    "static": "candidate",
+    "device": "not_probed",
+    "evidence_ids": [
+      "EVID-IO-1043-003"
+    ]
+  },
+  "policy": "withdrawn",
+  "status": "WITHDRAWN",
+  "provenance": {
+    "firmware_sha256": "519307675665e4866d722a8119a98589c397b614ac3294cb87bfc86de45756ec",
+    "source": "exact 3.101.043 IDB vela_ap.bin.i64; exact function-body and register-flow review",
+    "withdrawal_reason": "sub_C1D06B0 is a multi-argument internal fs_open path that processes path, flags, O_CREAT mode, and variadic state; it is not the recorded int(file *) direct dispatcher.",
+    "evidence_ids": [
+      "EVID-IO-1043-003"
+    ]
+  },
+  "notes": "The corpus-matched address and prototype were refuted on the exact target; no replacement direct-dispatch callable has been recovered.",
+  "approval_state": "REJECTED"
+}

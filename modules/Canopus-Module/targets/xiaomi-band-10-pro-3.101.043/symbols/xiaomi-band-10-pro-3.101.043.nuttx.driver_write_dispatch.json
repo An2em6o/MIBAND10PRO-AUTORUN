@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "symbol_id": "xiaomi-band-10-pro-3.101.043.driver_write_dispatch",
+  "target_id": "xiaomi-band-10-pro-3.101.043",
+  "name": "driver_write_dispatch",
+  "kind": "function",
+  "instruction_set": "thumb",
+  "prototype": "withdrawn",
+  "proof": {
+    "static": "candidate",
+    "device": "not_probed",
+    "evidence_ids": [
+      "EVID-IO-1043-003"
+    ]
+  },
+  "policy": "withdrawn",
+  "status": "WITHDRAWN",
+  "provenance": {
+    "firmware_sha256": "519307675665e4866d722a8119a98589c397b614ac3294cb87bfc86de45756ec",
+    "source": "exact 3.101.043 IDB vela_ap.bin.i64; exact public fs_write path and file_operations+0x0C slot review",
+    "withdrawal_reason": "The write slot is exact, but no independent exact-target direct file-level write wrapper has been recovered for this record; fail closed rather than infer a callable from a neighboring firmware.",
+    "evidence_ids": [
+      "EVID-IO-1043-003"
+    ]
+  },
+  "notes": "Use the exact public write entry instead of an unrecovered internal direct-dispatch helper.",
+  "approval_state": "REJECTED"
+}

@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "symbol_id": "xiaomi-band-10-pro-3.101.043.private_abi.gap_host_receive_slot",
+  "target_id": "xiaomi-band-10-pro-3.101.043",
+  "name": "gap_host_receive_slot",
+  "kind": "global",
+  "instruction_set": "n/a",
+  "entry_address": "0x2013C144",
+  "prototype": "int (*)(void *state, uint8_t *packet, int packet_length)",
+  "proof": {
+    "static": "confirmed",
+    "device": "retest_pending",
+    "evidence_ids": [
+      "EVID-BT-1043-GAP-001"
+    ]
+  },
+  "policy": "restricted",
+  "status": "STATIC_RECOVERED",
+  "provenance": {
+    "firmware_sha256": "519307675665e4866d722a8119a98589c397b614ac3294cb87bfc86de45756ec",
+    "evidence_ids": [
+      "EVID-BT-1043-GAP-001"
+    ],
+    "source": "exact 3.101.043 IDB vela_ap.bin.i64; callback registration, direct dispatch wrapper, and 3.101.036 structural comparison"
+  },
+  "approval_state": "PENDING",
+  "notes": "Direct live raw-H4 callback slot. sub_C81234C copies *callback_holder into 0x2013C144 and stores callback state at 0x2013C140; sub_C8172C0 dispatches every completed H4 packet through those two words. This is the exact 3.101.043 analogue of the proven 3.101.036 slot 0x20137E94."
+}

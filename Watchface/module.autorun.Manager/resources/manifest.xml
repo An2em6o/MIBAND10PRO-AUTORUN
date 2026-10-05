@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Watchface name="module.autorun.Manager" width="336" height="480" id="223675325764" SKU="false" compressMethod="RLEReversed" advanced="false" interactive="false" support_literal="false" editable="false">
+    <Resources>
+        <Image name="Image1" src="_preview/样式1亮屏预览图.png" compressMethod="RLEReversed" format="indexed8"/>
+        <File fileName="_lua/_Lua/module-autorun-manager.lua" name="_lua/_Lua/module-autorun-manager.lua"/>
+    </Resources>
+    <Theme type="normal" name="样式1" bgColor="#000000" isPhotoAlbumWatchface="false" preview="@Image1">
+        <Layout ref="@_lua/_Lua/module-autorun-manager.lua" x="0" y="0"/>
+    </Theme>
+</Watchface>

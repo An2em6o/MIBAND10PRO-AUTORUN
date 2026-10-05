@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "symbol_id": "xiaomi-band-10-pro-3.101.043.core_bt_callback_table",
+  "target_id": "xiaomi-band-10-pro-3.101.043",
+  "name": "core_bt_callback_table",
+  "kind": "global",
+  "instruction_set": "n/a",
+  "prototype": "const uint32_t[16]",
+  "proof": {
+    "static": "candidate",
+    "device": "not_probed",
+    "evidence_ids": [
+      "EVID-BT-1043-CORE-001"
+    ]
+  },
+  "policy": "withdrawn",
+  "status": "WITHDRAWN",
+  "provenance": {
+    "firmware_sha256": "519307675665e4866d722a8119a98589c397b614ac3294cb87bfc86de45756ec",
+    "evidence_ids": [
+      "EVID-BT-1043-CORE-001"
+    ],
+    "source": "exact 3.101.043 IDB vela_ap.bin.i64; exact adapter creation, adapter registration, cpevent registration, and global-writer analysis",
+    "withdrawal_reason": "Exact analysis recovered the adapter instance at 0x2013DBE4 and cpevent handle at 0x2013DBE0 but no independent immutable 16-word callback-table global; fail closed rather than reuse a neighboring-firmware address."
+  },
+  "approval_state": "REJECTED",
+  "notes": "The target-private adapter registration ABI accepts a caller-owned callback table; this withdrawn record does not supply one from stock firmware."
+}

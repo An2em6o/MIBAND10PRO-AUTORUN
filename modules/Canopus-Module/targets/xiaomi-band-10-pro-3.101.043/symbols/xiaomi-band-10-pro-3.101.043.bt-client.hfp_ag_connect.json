@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "symbol_id": "xiaomi-band-10-pro-3.101.043.hfp_ag_connect",
+  "target_id": "xiaomi-band-10-pro-3.101.043",
+  "name": "hfp_ag_connect",
+  "kind": "function",
+  "instruction_set": "thumb",
+  "prototype": "int(void *, const void *)",
+  "proof": {
+    "static": "confirmed",
+    "device": "not_probed",
+    "evidence_ids": [
+      "EVID-BT-1043-MISC-003"
+    ]
+  },
+  "policy": "forbidden",
+  "status": "FORBIDDEN",
+  "provenance": {
+    "firmware_sha256": "519307675665e4866d722a8119a98589c397b614ac3294cb87bfc86de45756ec",
+    "source": "exact 3.101.043 IDB vela_ap.bin.i64; exact six-byte peer-address copy and HFP-AG command 0x9B dispatch",
+    "evidence_ids": [
+      "EVID-BT-1043-MISC-003"
+    ]
+  },
+  "entry_address": "0xc3b0db0",
+  "callable_address": "0xc3b0db1",
+  "notes": "Exact HFP-AG connect wrapper; remains forbidden because the internal adapter command lifecycle is not a supported module contract.",
+  "approval_state": "REJECTED"
+}

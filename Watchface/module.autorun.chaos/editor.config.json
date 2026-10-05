@@ -1,0 +1,56 @@
+{
+  "themes": [
+    {
+      "id": "5k9t095sb",
+      "name": "样式1",
+      "type": "normal",
+      "children": [
+        {
+          "id": "muv38q151",
+          "type": "JsFile",
+          "attrs": {
+            "sourceEnabled": false,
+            "valueStart": 0,
+            "valueEnd": 0,
+            "angleStart": 0,
+            "angleEnd": 360,
+            "recolorEnable": true,
+            "x": 0,
+            "y": 0,
+            "w": 336,
+            "h": 480,
+            "rotation": 0,
+            "name": "JS/LUA程序1",
+            "showImgFormat": false,
+            "_visibility": true,
+            "_isLocked": false,
+            "temperatureUnitType": "celsius",
+            "fileRef": "layout引用",
+            "jsFilename": "_lua/_Lua/dotui.lua",
+            "jsImgNames": [
+              "_lua/_Lua/chaos_icon.bin"
+            ]
+          }
+        }
+      ],
+      "bgColor": "#000000",
+      "colorGroupTable": [
+        {
+          "id": "6x423gvjp",
+          "name": "配色1",
+          "color": "#ffffff"
+        }
+      ],
+      "preview": "_preview/样式1亮屏预览图.png"
+    }
+  ],
+  "i18n": {
+    "translations": {},
+    "locales": []
+  },
+  "introData": {},
+  "aodDisplayMode": "single",
+  "formats": {},
+  "dataSource": {},
+  "isSlotFollowing": false
+}

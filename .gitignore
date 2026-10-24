@@ -15,6 +15,7 @@ venv/
 # ---- 临时 / 中间 / 扫描输出（可重建或一次性）----
 _chk_out/
 _dropped/
+_build/
 **/target/
 **/*.rej
 **/*.orig

@@ -32,7 +32,7 @@ import re
 import sys
 
 LUPA_PY = r"C:\Users\Administrator\.workbuddy\binaries\python\envs\default\Scripts\python.exe"
-INSTALLER = r"C:\zcode\chaos-autostart\Chaos-Module\installer\chaos_installer.lua"
+INSTALLER = r"C:\zcode\chaos-autostart\modules\Chaos-Module\installer\chaos_installer.lua"
 
 FAILS = []
 NCHK = [0]

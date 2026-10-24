@@ -19,7 +19,7 @@ import sys
 import tempfile
 
 ROOT = r"C:\zcode\chaos-autostart"
-SUP = os.path.join(ROOT, "Chaos-Module", "supervisor")
+SUP = os.path.join(ROOT, "modules", "Chaos-Module", "supervisor")
 IPC = os.path.join(SUP, "src", "ipc.rs")
 MOVED = os.path.join(SUP, "src", "_moved_block.txt")
 PY = sys.executable
@@ -101,7 +101,7 @@ def gate_sim():
     if py is None:
         say(False, "G3 安装器行为门", note)
         return
-    r = subprocess.run([py, os.path.join(ROOT, "_sim_autostart.py")], capture_output=True)
+    r = subprocess.run([py, os.path.join(ROOT, "tool", "_sim_autostart.py")], capture_output=True)
     out = (r.stdout + r.stderr).decode("utf-8", "replace")
     tail = [l for l in out.strip().split("\n") if l.strip().startswith("SIM-AUTOSTART")]
     say(r.returncode == 0, "G3 安装器行为门", tail[0] if tail else out[-300:])

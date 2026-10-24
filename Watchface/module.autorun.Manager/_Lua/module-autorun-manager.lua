@@ -21,8 +21,25 @@ local C_GRAY  = 0x4A4A52   -- core（不可操作）
 local F_BODY = "MiSans-Regular"
 local F_BOLD = "MiSans-Demibold"
 
+-- ★ 字体对象只造一次（2026-10-24 性能）：全文件有 19 处字体构造，但模块页那三行
+--   在 12 格循环里 ⇒ **载入期实际构造 60 个 Font**，而真正不同的只有 (字体, 字号) 七种。
+--   字体在 LVGL 里是不可变的共享对象，按名字+字号缓存是安全的；省下的是载入时的构造/查表。
+local FONT_CACHE = {}
+local function font(name, size)
+  local key = name .. ":" .. size
+  local f = FONT_CACHE[key]
+  if not f then f = lvgl.Font(name, size) FONT_CACHE[key] = f end
+  return f
+end
+
 local W, H = 336, 480
 local PAGE_HIDE = 2000
+
+-- ★ 两个「窗口」的秒数（2026-10-24 起可调，模块页 → 延迟管理）：
+--   pre  = 扣闸之后、第一个普通模块之前的等待（老版本的 `sleep 8`）
+--   post = 全部模块跑完、放行之前的等待（老版本的 `sleep 15`）
+--   存进 autorun.json 的根上（不是逐模块字段），改完要 [应用] 才落到 /data/rc。
+local CFG = { pre = 8, post = 15 }
 
 -- ===================== 路径 =====================
 -- ★ 管理器是**独立项目**：自己的日志/临时件只许落在 `/data/10pro.autorun/` 下。
@@ -73,7 +90,7 @@ local SLEEP_POST = "sleep 15"                     -- 窗口 2：全部跑完之�
 -- 不再需要"沙箱路径 / 兜底路径"两套落点，也不再有"这份编辑器看不见"那种半可用状态。
 -- **只有一个落点。**
 --   ★ 它不以 `.sh` 结尾，所以 load_slices() 会**无视**它，不会被当成一个模块。
---   ★ CFG_OK = false 时**拒绝重建** —— 否则配置一旦读不到，重建出来的 /data/rc
+--   ★ CFG_OK = false 时**拒绝应用** —— 否则配置一旦读不到，重建出来的 /data/rc
 --     会丢掉全部被禁用的记录（甚至生成空表），把开机链悄悄改掉。
 local CFG_FILE  = "autorun.json"
 local CFG_PATH  = RC_DIR .. "/" .. CFG_FILE
@@ -81,7 +98,8 @@ local CFG_OK    = false
 
 -- 模块页：★ 改成**滚动翻页**（按用户要求，2026-10-04 去掉上一页/下一页）。
 -- 本项目的 LVGL Lua 上"动态增删子对象"没验过 ⇒ 行是**预建的固定 ROW_POOL 行**，
--- 只改文本与颜色；容器可滚，一屏放得下 ROWS_VISIBLE 行（几何见 UI 段）。
+-- 只改文本与颜色；一屏放得下 ROWS_VISIBLE 行（几何见 UI 段）。
+-- ★ 2026-10-24 用户要求：**默认不滚，只有一屏放不下时才滚**（开关在 render_rows 里）。
 local ROW_POOL      = 12                          -- 预建行数（= 能显示的模块上限）
 local ROWS_VISIBLE  = 6                           -- 一屏可见行数
 local ROW_H, ROW_GAP = 50, 6                      -- 行高 / 行间距
@@ -99,6 +117,9 @@ local MINI_LINE_H     = 20                         -- 字号 14 的行距（保�
 local MINI_BOX_H_MAIN = 214                        -- 主页日志框高（UI 段建框时用同一个值）
 local MINI_BOX_H_AS   = 290                        -- 自启动页日志框高
 local MAX_UNITS       = 36                         -- 36 单位 × 7.5px ≈ 270px < 288px
+-- 管理器日志文件的上限：超过就在启动时收敛成最后 30 行（见 log_restore）。
+-- 12KB ≈ 300 行，够翻；再大就只是拖慢冷启动 + 白占 flash。
+local LOG_MAX_BYTES   = 12288
 local function mini_lines_of(h)
   local n = math.floor((h - MINI_PAD * 2) / MINI_LINE_H)
   if n < 1 then n = 1 end
@@ -410,6 +431,12 @@ end
 local log_lines, log_seq = {}, 0
 local log_label, mini_log_label, as_log_label, status_label
 local tail_lines
+-- ★ 2026-10-24 性能：日志页是否**正被看见**。日志页那个 Label 是要把最多 200 行
+--   重新排版一次的（LVGL 要重新解析整段文本）。不看着它的时候排版纯属白烧 ——
+--   log_append 每写一行都会改它，装/卸一次几十行就是几十次全局重排。
+--   所以：不可见时只更内存，进日志页（show_log）再一次性重排。
+local log_page_on = false
+local log_color = C_DIM
 -- 两个小窗各自能放几行（UI 段建框时算出来，见 mini_lines_of）
 local mini_lines_main, mini_lines_as
 -- 自启动页那个框**上半部分**的状态摘要（照 shellpp2 的自启动页）。
@@ -417,7 +444,21 @@ local mini_lines_main, mini_lines_as
 --   只能由 refresh_as_state() 在明确时刻刷（开机 / 进自启动页 / 装·卸·开关之后）。
 local AS_STATE = {}
 
+-- ★ 启动段把日志**攒起来一次落盘**（2026-10-24 性能）：冷启动要连写十几行，以前每行
+--   一次 open/write/close（flash 上就是十几次元数据操作）。现在启动段进缓冲区，
+--   结束时一次写完 —— 内容一字不差，只是 12 次 fs 操作压成 1 次。
+--   ★ 用户操作阶段**仍然逐行落盘**：写 flash 崩掉时，最后几行是唯一证据。
+--   ★ 塞进一张表是为了省 local（主 chunk 已经贴着 200 个的上限）。
+local LOGBUF = {}
+function LOGBUF.flush()
+  if not LOGBUF.lines then return end
+  local body = table.concat(LOGBUF.lines, "\n") .. "\n"
+  LOGBUF.lines = nil
+  local f = io.open(MGR_LOG, "a")
+  if f then f:write(body) pcall(f.close, f) end
+end
 local function log_persist(line)
+  if LOGBUF.lines then LOGBUF.lines[#LOGBUF.lines + 1] = line return end
   local f = io.open(MGR_LOG, "a")
   if f then f:write(line .. "\n") pcall(f.close, f) end
 end
@@ -468,11 +509,15 @@ end
 
 local function log_append(text, color)
   log_seq = log_seq + 1
-  local line = string.format("%02d  %s", log_seq % 100, tostring(text))
+  -- ★ 以前是 "%02d" + `log_seq % 100` —— 到 100 就绕回 00，日志里出现两套编号。
+  --   现在固定三位、不取模：001、002…999、1000（长会话也不会重号）。
+  local line = string.format("%03d  %s", log_seq, tostring(text))
   log_lines[#log_lines + 1] = line
   while #log_lines > 200 do table.remove(log_lines, 1) end
-  if log_label then
-    log_label:set { text = table.concat(log_lines, "\n"), text_color = color or C_DIM }
+  log_color = color or C_DIM
+  -- ★ 只有日志页看得见时才重排那个大 Label（见 log_page_on 的注释）。
+  if log_label and log_page_on then
+    log_label:set { text = table.concat(log_lines, "\n"), text_color = log_color }
   end
   log_mini(color)
   log_persist(line)
@@ -490,6 +535,14 @@ local function log_restore()
   for line in raw:gmatch("[^\n]+") do tmp[#tmp + 1] = line end
   while #tmp > 60 do table.remove(tmp, 1) end
   log_lines = tmp
+  -- ★ 文件本身也要收口（2026-10-24 性能）：以前只 append、从不收敛，
+  --   一年下来冷启动要先把整本日志读进内存再扔掉 99%。超过上限就把它重写成最后 30 行。
+  --   写失败无所谓（内存里那份才是要显示的），所以不报错、不打断启动。
+  if #raw > LOG_MAX_BYTES then
+    local keep = {}
+    for i = math.max(1, #tmp - 29), #tmp do keep[#keep + 1] = tmp[i] end
+    write_file(MGR_LOG, table.concat(keep, "\n") .. "\n")
+  end
   if log_label then
     log_label:set { text = table.concat(tmp, "\n"), text_color = 0xFFD27A }
   end
@@ -536,7 +589,7 @@ end
 -- 确保配置文件在。**只有一个落点**（注册目录里的 autorun.json），没有兜底路径。
 --   ① 文件已在      -> 直接用，一个字节都不动
 --   ② 目录/文件不在 -> mkdir -p 建目录 + 落一份空配置
---   ③ 建不出来      -> 返回 false。调用方必须**拒绝重建**（不要把半套状态写进 /data/rc）
+--   ③ 建不出来      -> 返回 false。调用方必须**拒绝应用**（不要把半套状态写进 /data/rc）
 -- ★ 不能用"exists(目录)"判 mkdir 成功：NuttX 上 open() 开目录返回 -6(ENXIO)，
 --   io.open 会返回 nil，于是"目录明明建好了"也会被判成失败。直接试**写文件**才对。
 -- ★ 不再有"降级到兜底"：两套落点意味着"改哪个才是真源"要额外裁决，
@@ -549,18 +602,33 @@ local function ensure_config()
   return false
 end
 
--- 扫注册目录: /data/rc.d/*.sh -> 名字列表（排序）
+-- 扫注册目录: /data/rc.d/*.sh -> 名字列表（排序）+ **#top 特权表**（2026-10-24 新）
 -- ★ 同一个目录里还躺着 autorun.json —— 它不匹配 `^[%w_%-]+%.sh$`，所以**看不见**。
 --   这不是巧合：配置文件的后缀故意选 `.json` 而不是 `.sh`，就不会被当成模块。
+-- ★ #top：脚本**第一行**里出现连续四个字符 `#top` ⇒ 特权模块。它必须抢在所有人前面跑
+--   （闸一扣就上、不等 8 秒窗、彼此之间也不隔），但**不许调顺序/延迟**。
+--   判据只看第一行，是因为模块作者只会在文件头上写标记；扫全文会误伤命令里的 #top。
+--   代价：每次刷新多 N 次小文件读（脚本都是几十字节，可忽略）。
 local function load_slices()
-  local names, seen = {}, {}
+  local names, seen, tops = {}, {}, {}
   local raw = exec_capture("ls " .. RC_DIR)
   for _, tok in ipairs(tokens(raw)) do
     local n = tok:match("^([%w_%-]+)%.sh$")
-    if n and not seen[n] then seen[n] = true names[#names + 1] = n end
+    if n and not seen[n] then
+      seen[n] = true names[#names + 1] = n
+      local body = read_all(RC_DIR .. "/" .. n .. ".sh", "r")
+      if type(body) == "string" then
+        local first = body:match("^[^\n]*") or ""
+        -- ★ 2026-10-24：`#top` 之外再接受 **带空格的 `# top`**（模块作者写注释时习惯加空格），
+        --   另外兼容 `#tun` 这种笔误写法 —— 三个都当特权标记。
+        if first:find("#%s*[Tt][Oo][Pp]") or first:find("#%s*[Tt][Uu][Nn]") then
+          tops[n] = true
+        end
+      end
+    end
   end
   table.sort(names)
-  return names
+  return names, tops
 end
 
 -- /data/rc 里"生成行"引用的模块名（`sh /data/rc.d/<name>.sh` -> name）。
@@ -588,7 +656,7 @@ local function refs_from_rc()
   return names
 end
 
--- 读策略文件。空/坏都当空配置（不报错，交给界面上屏），但**调用方要据此拒绝重建**：
+-- 读策略文件。空/坏都当空配置（不报错，交给界面上屏），但**调用方要据此拒绝应用**：
 -- merge() 面对空配置会把所有切片当成"新注册"、默认 enable=true —— 那是**放开**，
 -- 而不是**禁用**，所以就算读坏了也不至于把开机链清空；但"被禁用过的"记录会丢。
 -- 所以规则是：读不到/读坏了 -> 先把它**逐字节备份**出来，再当空配置往下走。
@@ -606,11 +674,16 @@ local function load_policy(path)
   for k, v in pairs(t.modules) do
     if type(v) ~= "table" then t.modules[k] = { enable = true } end
   end
+  -- 两个窗口：缺省 8 / 15，夹在 1..60（与数字键盘一致）
+  local pre, post = tonumber(t.pre), tonumber(t.post)
+  if pre and pre >= 1 and pre <= 100 then CFG.pre = math.floor(pre) end
+  if post and post >= 1 and post <= 100 then CFG.post = math.floor(post) end
   return t, nil
 end
 
 local function default_policy(name)
-  return { core = false, delay = 0, desc = "", enable = true, order = 100, _n = name }
+  -- delay 默认 1（2026-10-24 起它真的会被写进 /data/rc；最小 1 秒）
+  return { core = false, delay = 1, desc = "", enable = true, order = 100, _n = name }
 end
 
 -- 合并：列表来源 = **rc.d 里的 .sh** ∪ **/data/rc 里的生成行引用**。
@@ -626,7 +699,8 @@ end
 --   ⇒ 两边都空（rc.d 里一个 .sh 都没有、/data/rc 里也没有生成行）时列表为空，
 --     模块管理页**什么都不显示**（"没安装"就是这个样子）。
 -- 返回：排序后的列表 / "配置要不要回写" / "缺脚本条数"。
-local function merge(slices, refs, policy)
+-- tops = #top 特权模块的名字集合（由 load_slices 读第一行得到）。
+local function merge(slices, refs, policy, tops)
   local mods = policy.modules or {}
   local present, ref = {}, {}
   for _, n in ipairs(slices) do present[n] = true end
@@ -655,16 +729,64 @@ local function merge(slices, refs, policy)
       enable  = p.enable == true,
       core    = p.core == true,
       order   = tonumber(p.order) or 100,
-      delay   = tonumber(p.delay) or 0,
+      delay   = tonumber(p.delay) or 1,
       desc    = tostring(p.desc or ""),
       present = is_present,
       ref     = ref[n] == true,
+      top     = (tops ~= nil) and (tops[n] == true),
+      installed = tonumber(p.installed),
     }
   end
-  table.sort(list, function(a, b)
+
+  -- ★ 归一化（2026-10-24）：老配置里 order 全是 100、delay 全是 0（那会儿没有编辑入口，
+  --   delay 也没被 build_rc 用过）⇒ 打开页面永远是"order 100 · delay 0"。这里一次性纠正：
+  --     ① delay < 1 ⇒ 1（build_rc 的最小单位就是 1 秒）
+  --     ② 首次认出的模块补一个 installed 时间戳（os.time，秒）—— 详情页显示"安装时间"，
+  --        多个 #top 之间也用它排先后（比自增序号稳：删掉中间某个不会造成重号/错位）
+  --     ③ order 有重复 ⇒ 按当前显示顺序重编号 10/20/30…
+  local now = nil
+  for _, m in ipairs(list) do
+    if m.delay < 1 then m.delay = 1 changed = true end
+    if m.present and type(m.installed) ~= "number" then
+      if not now then
+        local ok, t = pcall(os.time)
+        now = (ok and type(t) == "number") and math.floor(t) or 0
+      end
+      m.installed = now
+      local p = mods[m.name]
+      if type(p) == "table" then p.installed = now end
+      changed = true
+    end
+  end
+
+  local function byorder(a, b)
+    if a.top ~= b.top then return a.top end
+    if a.top then
+      -- 特权之间：按**安装时间**，同秒再按名字
+      local ia, ib = a.installed or 0, b.installed or 0
+      if ia ~= ib then return ia < ib end
+      return a.name < b.name
+    end
     if a.order ~= b.order then return a.order < b.order end
     return a.name < b.name
-  end)
+  end
+  table.sort(list, byorder)
+
+  -- ③ 重号：同一档里 order 有重复 ⇒ 按位置重排（只重排普通模块，特权的顺序由安装时间定）
+  local dup, seen_o = false, {}
+  for _, m in ipairs(list) do
+    if not m.top then
+      if seen_o[m.order] then dup = true break end
+      seen_o[m.order] = true
+    end
+  end
+  if dup then
+    local k = 0
+    for _, m in ipairs(list) do
+      if not m.top then k = k + 1 m.order = k * 10 end
+    end
+    changed = true
+  end
   return list, changed, missing
 end
 
@@ -705,20 +827,27 @@ local function split_others(cur)
       or t == CLEAR_LINE or t == ON_GATE
     then mine[i] = true end
   end
-  -- 第二遍：通用词（fi / 三个 sleep N）只有在**上下文是我们自己**时才算我们的。
+  -- 第二遍：通用词（fi / 各种 sleep N）只有在**上下文是我们自己**时才算我们的。
+  -- ★ 2026-10-24 起 sleep 有两种：窗口（8 / 15）和**每模块自己的延迟**（任意 N）。
+  --   判据靠**邻居**，不靠数字：延迟行后面一定紧跟生成行；窗口 15 后面一定是 cleared。
+  -- ★ 坑：`nxt` 必须从**原文**取，不能取 mine[i+1] —— 连续两行 sleep（窗口 8 后面
+  --   紧跟模块延迟）时，后一行这时候还没被标记 ⇒ 取 mine 会得到 nil ⇒ 窗口 8 被判成
+  --   别人的行 ⇒ 每次重建多加一对 sleep（实测踩到）。
   for i = 1, n do
     if not mine[i] then
       local t = lead(lines[i])
-      local prev = mine[i - 1] and lead(lines[i - 1]) or nil
-      local nxt = mine[i + 1] and lead(lines[i + 1]) or nil
-      if t == SLEEP_LINE and isgen(prev) and isgen(nxt) then
-        mine[i] = true                                    -- 两行模块行之间那一秒
-      elseif t == FI_LINE and prev ~= nil then
+      local prev = (i > 1) and lead(lines[i - 1]) or nil
+      local nxt = (i < n) and lead(lines[i + 1]) or nil
+      local own_prev = (i > 1) and mine[i - 1] or false
+      local nxt_sleep = nxt ~= nil and nxt:match("^sleep %d+$") ~= nil
+      local is_sleep = t:match("^sleep %d+$") ~= nil
+      if t == FI_LINE and own_prev then
         mine[i] = true                                    -- 收尾：紧跟在我们自己的行后
-      elseif t == SLEEP_PRE and prev == RM_GATE and isgen(nxt) then
-        mine[i] = true                                    -- 窗口 1
-      elseif t == SLEEP_POST and isgen(prev) and nxt == CLEAR_LINE then
-        mine[i] = true                                    -- 窗口 2
+      elseif is_sleep and own_prev and nxt == CLEAR_LINE then
+        mine[i] = true                                    -- 窗口 2（秒数可调 ⇒ 靠 cleared 认）
+      elseif is_sleep and (prev == RM_GATE or isgen(prev) or own_prev)
+        and (isgen(nxt) or nxt_sleep) then
+        mine[i] = true                                    -- 窗口 1 / 模块延迟（靠邻居认）
       end
     end
   end
@@ -746,20 +875,31 @@ end
 local function build_rc(list, others)
   local L = { "set +e" }
   for _, line in ipairs(others) do L[#L + 1] = line end
-  local run = {}
+  -- ★ 2026-10-24：分两拨。#top 特权的抢在窗口 1 **之前**、彼此不隔；
+  --   普通模块各自带一格 `sleep <delay>`（用户可调，1..60 秒）。
+  local tops, run = {}, {}
   for _, m in ipairs(list) do
-    if m.enable and m.present then run[#run + 1] = GEN_LINE .. m.name .. ".sh" end
+    if m.enable and m.present then
+      if m.top then tops[#tops + 1] = m else run[#run + 1] = m end
+    end
   end
-  if #run > 0 then
+  if #tops + #run > 0 then
     L[#L + 1] = HB_LINE
     L[#L + 1] = IF_LINE
     L[#L + 1] = RM_GATE                            -- 扣闸：跑不完就一直是关的
-    L[#L + 1] = SLEEP_PRE                          -- 窗口 1
-    for i = 1, #run do
-      if i > 1 then L[#L + 1] = SLEEP_LINE end     -- 上一个跑完，停 1 秒再跑下一个
-      L[#L + 1] = run[i]                           -- ★ 不带 & ：同步跑，不后台
+    for i = 1, #tops do
+      L[#L + 1] = GEN_LINE .. tops[i].name .. ".sh" -- 特权：扣完闸立刻跑，不等待
     end
-    L[#L + 1] = SLEEP_POST                         -- 窗口 2
+    if #run > 0 then
+      L[#L + 1] = "sleep " .. CFG.pre                -- 窗口 1（秒数可调，默认 8）
+      for i = 1, #run do
+        local d = math.floor(tonumber(run[i].delay) or 1)
+        if d < 1 then d = 1 elseif d > 100 then d = 100 end
+        L[#L + 1] = "sleep " .. d                  -- ★ 每个模块**自己**的那格延迟
+        L[#L + 1] = GEN_LINE .. run[i].name .. ".sh"
+      end
+    end
+    L[#L + 1] = "sleep " .. CFG.post                 -- 窗口 2（秒数可调，默认 15）
     L[#L + 1] = CLEAR_LINE                         -- 它的缺席 = 上次被打断的唯一证据
     L[#L + 1] = ON_GATE                            -- 放行：闸加回来
     L[#L + 1] = FI_LINE
@@ -790,8 +930,10 @@ end
 -- rc 状态：生成 N 行（模块行数）。别人的行数**走同一个 split_others** ——
 -- ★ 不能在这里自己再写一套"非生成行就算别人的"：那样 if/fi/sleep 会被算成
 --   "别人的行"，状态行立刻就开始说假话（"生成 2 别人 3"）。
-local function rc_state()
-  local cur = read_all(RC_PATH)
+local function rc_state(cur)
+  -- ★ 2026-10-24 性能：cur 可以由调用方先读好传进来。状态行里 rc_state 与 rc_pending
+  --   都要 /data/rc 的同一份内容，以前各读一次（一次状态刷新 = 2 次读盘）。
+  if type(cur) ~= "string" then cur = read_all(RC_PATH) end
   if type(cur) ~= "string" then
     if rc_present_by_ls() == false then return "无", 0, 0 end
     return "读不到", 0, 0
@@ -869,10 +1011,13 @@ local function policy_from(list, version)
       mods[m.name] = {
         core = m.core, delay = m.delay, desc = m.desc,
         enable = m.enable, order = m.order,
+        -- 首次认出的时间戳（秒）：详情页显示"安装时间"，多个 #top 按它排先后
+        installed = m.installed,
       }
     end
   end
-  return { version = version or 1, modules = mods }
+  -- 两个窗口的秒数放在**根上**（全局设置，不属于任何模块）
+  return { version = version or 1, pre = CFG.pre, post = CFG.post, modules = mods }
 end
 
 local function save_policy(list, version)
@@ -898,6 +1043,12 @@ local scroll_log_bottom
 local render_rows
 local mod_list_top
 local refresh_as_state
+-- ★ 模块页那三个浮层（详情 / 数字键盘 / 顺序模式）的状态与控件引用全在 UI 里。
+--   为什么用一张表而不是十几个 local：主 chunk 的 local 已经贴着 Lua 的 200 上限。
+local UI = { mode = "", sel = 0, idx = 0, digits = "" }
+-- 模块列表的内容指纹（render_rows 早退用）。在这里声明是为了让 UI 段的函数也能清它：
+-- 顺序模式/高亮变了必须强制重画，而"内容没变"的早退会把它吞掉。
+local rows_sig = nil
 
 -- ===================== 高层动作 =====================
 
@@ -912,9 +1063,10 @@ local _cfg_err = nil
 --   但"新建"和"建不出来"这两件事仍然要上屏 —— 前者是"你第一次用"，后者是"现在别信我"。
 local function refresh_all(quiet)
   local had = exists(CFG_PATH)
-  CFG_OK = ensure_config()
+  -- had 已经问过"文件在不在"了，ensure_config 第一句问的是同一件事 —— 别问第二遍。
+  CFG_OK = had or ensure_config()
   if not CFG_OK then
-    log_append("配置建不出来: " .. CFG_PATH .. " -> 拒绝重建", 0xFF9A9A)
+    log_append("配置建不出来: " .. CFG_PATH .. " -> 拒绝应用", 0xFF9A9A)
   elseif not had then
     -- "第一次用"一辈子只发生一次，不受 quiet 影响 —— quiet 只是压掉例行噪音。
     log_append("配置已新建: " .. CFG_PATH, 0x8FF0A4)
@@ -925,9 +1077,9 @@ local function refresh_all(quiet)
   if _cfg_err then
     log_append("配置解析失败(" .. tostring(_cfg_err) .. ") 已留底 .bad", 0xFFD27A)
   end
-  local slices = load_slices()
+  local slices, tops = load_slices()
   local refs = refs_from_rc()
-  local list, changed, missing = merge(slices, refs, _policy)
+  local list, changed, missing = merge(slices, refs, _policy, tops)
   MODS = list
   if changed then
     local ok, err = save_policy(MODS, _policy.version)
@@ -946,9 +1098,10 @@ end
 -- ★ 这是"去掉自动重建"之后必须补上的安全网：自动重建没了，
 --   "改了但还没落盘"这件事就必须**看得见**，否则改了开关却什么都不发生，全靠人猜。
 --   它就是 build_rc 的定义式比较 —— 内容一致 = 不待重建。
-local function rc_pending()
+local function rc_pending(cur)
   if not CFG_OK then return true end
-  local cur = read_all(RC_PATH)
+  -- ★ 同上：cur 可由调用方传入（与 rc_state 共用同一次读盘）。
+  if type(cur) ~= "string" then cur = read_all(RC_PATH) end
   if type(cur) ~= "string" then return true end
   return cur ~= build_rc(MODS, split_others(cur))
 end
@@ -958,10 +1111,12 @@ end
 -- ⇒ 折成两行 ⇒ 第二行被切掉。"自启开/关"是这一版新加的，正好踩到这条。
 local function refresh_status(extra)
   if not status_label then return end
-  local st, gen, others = rc_state()
+  -- ★ 一次读盘喂给两个函数（rc_state 解析 + rc_pending 比对），以前是各读一次。
+  local cur = read_all(RC_PATH)
+  local st, gen, others = rc_state(cur)
   local text = extra or string.format("rc %s 生成%d 别人%d 自启%s%s",
     st, gen, others, gate_on() and "开" or "关",
-    rc_pending() and " ●待重建" or "")
+    rc_pending(cur) and " ●待应用" or "")
   status_label:set { text = one_line_w(text, 40), text_color = C_TXT3 }
 end
 
@@ -973,7 +1128,7 @@ end
 local function do_rebuild()
   refresh_all(true)
   if not CFG_OK then
-    log_append("拒绝重建: " .. CFG_PATH .. " 建不出来", 0xFF9A9A)
+    log_append("拒绝应用: " .. CFG_PATH .. " 建不出来", 0xFF9A9A)
     refresh_status() render_rows()
     return
   end
@@ -987,7 +1142,7 @@ local function do_rebuild()
   if not gok then
     local why = (log_last() == "gate_off") and "上次开机没跑到底, 闸停在扣住状态"
       or (exists(GATE_OFF) and "你关过" or "还没有过")
-    log_append("注意: 总开关是关的(" .. why .. ") -> 这次重建出来的模块行不会跑", 0xFFD27A)
+    log_append("注意: 总开关是关的(" .. why .. ") -> 这次应用出来的模块行不会跑", 0xFFD27A)
     log_append("-> 面板显示 未启动; 要开机自动跑, 请按 [3 开启]", 0xFFD27A)
   end
   -- ★ "不在" 和 "在但读不出来" **必须分开处置**（这是真机上踩到的 bug，2026-10-04）：
@@ -1002,7 +1157,7 @@ local function do_rebuild()
       cur = ""
       log_append(RC_PATH .. " 不在 -> 当成空的, 这次会把它建出来", 0xFFD27A)
     else
-      log_append("拒绝重建: " .. RC_PATH .. " 读不出来" ..
+      log_append("拒绝应用: " .. RC_PATH .. " 读不出来" ..
         (present == true and " (文件在, 怕抹掉别人的行)" or " (连 ls /data 都没判出来)"),
         0xFF9A9A)
       refresh_status() render_rows()
@@ -1012,23 +1167,23 @@ local function do_rebuild()
   local others = split_others(cur)
   local body = build_rc(MODS, others)
   if cur == body then
-    log_append("重建: 内容未变, 未写盘 (" .. #others .. " 行别人的)", 0x8FF0A4)
+    log_append("应用: 内容未变, 未写盘 (" .. #others .. " 行别人的)", 0x8FF0A4)
     refresh_status() render_rows()
     return
   end
   local ok, err = write_file(RC_PATH, body)
   if not ok then
-    log_append("重建失败: " .. tostring(err), 0xFF9A9A)
+    log_append("应用失败: " .. tostring(err), 0xFF9A9A)
     refresh_status() render_rows()
     return
   end
   local wrote = 0
   for _, m in ipairs(MODS) do if m.enable and m.present then wrote = wrote + 1 end end
   -- ★ 必须在下面那条 log_append **之前**刷面板：log_mini 会把当时的文本写进"上屏流水"，
-  --   排后面的话「重载: ● 待重建」会先被推上屏一次（真机上闪一下、判据里被咬住）。
+  --   排后面的话「重载: ● 待应用」会先被推上屏一次（真机上闪一下、判据里被咬住）。
   --   /data/rc 已经写完了，所以这里读到的就是新状态。
   refresh_as_state()
-  log_append(string.format("已重建 /data/rc: %d 行生成 + %d 行别人的", wrote, #others),
+  log_append(string.format("已应用 /data/rc: %d 行生成 + %d 行别人的", wrote, #others),
     0x8FF0A4)
   refresh_status() render_rows()
 end
@@ -1039,17 +1194,19 @@ end
 --   用户看到的是界面，不是 /data/rc。
 --   现在写它的地方只有**明说的那几处**：模块页/主页 [重建]、自启动页 [1 安装] 与
 --   [3 开启]。（[2 接管] 那条已经整个删掉了，见下面 do_init_* 上面那段注释。）
---   补偿手段是 refresh_status 里的「●待重建」提示 + 改开关后那句"按 [重建自启动] 生效"。
+--   补偿手段是 refresh_status 里的「●待应用」提示 + 改开关后那句"按 [重建自启动] 生效"。
 
 -- 总开关（自启动页 [3 开启] / [4 关闭]）：开启 = 建那个文件；关闭 = 删那个文件。
 -- ★ 关闭**不写** /data/rc —— 门就是"文件在不在"，删掉它下次开机整个生成区都不跑。
 --   这正好是可审计的地方：逐模块的 allow/deny 一个字节都没动，开回来立刻恢复原样。
 local function set_gate(on)
-  refresh_all(true)
+  -- ★ 2026-10-24：「开」这条路下面会走 do_rebuild()，它自己第一句就是 refresh_all(true)。
+  --   所以这里不再先扫一遍（一次 [3 开启] 以前要扫两次 rc.d = 6 个 shell 进程）。
   if on then
     local ok, err = write_file(GATE, "on\n")
     if not ok then
       log_append("开启失败: " .. tostring(err), 0xFF9A9A)
+      refresh_all(true)                 -- 失败这条路没走 do_rebuild，自己补一次扫描
       refresh_status() return
     end
     exec("rm -f " .. GATE_OFF)      -- ★ 用户显式开过 -> 撤掉"他关过"的凭据
@@ -1057,6 +1214,8 @@ local function set_gate(on)
     do_rebuild()                       -- 老设备的 /data/rc 里可能还没有那道门
     refresh_as_state()                 -- 开关 + "会跑几个" 都变了
   else
+    -- 「关」这条路不经过 do_rebuild，得自己扫一遍（MODS 要最新，状态行才算得对）。
+    refresh_all(true)
     exec_logged("rm -f " .. GATE, "删除总开关 " .. GATE)
     if exists(GATE) then
       log_append("关闭失败: 删不掉 " .. GATE, 0xFF9A9A)
@@ -1070,30 +1229,6 @@ local function set_gate(on)
     refresh_status() render_rows()
     refresh_as_state()
   end
-end
-
--- 全部允许 / 全部禁止（core 不动）
-local function set_all(want)
-  refresh_all(true)
-  local n = 0
-  for _, m in ipairs(MODS) do
-    if not m.core and m.present and m.enable ~= want then
-      m.enable = want
-      n = n + 1
-    end
-  end
-  if n == 0 then
-    log_append(want and "全部启用: 没有需要改的" or "全部禁止: 没有需要改的")
-  else
-    local ok, err = save_policy(MODS, _policy.version)
-    if not ok then log_append("回写失败: " .. tostring(err), 0xFF9A9A)
-    else
-      log_append((want and "全部启用 " or "全部禁止 ") .. n .. " 项", 0x8FF0A4)
-      log_append("-> 配置已改, 按 [2 重建自启动] 才落到 /data/rc", 0xFFD27A)
-    end
-  end
-  refresh_status()
-  render_rows()
 end
 
 -- 单个模块 允许<->禁止（core 不给动）
@@ -1117,7 +1252,7 @@ local function toggle_mod(name)
       else
         log_append("[" .. name .. "] -> " .. (m.enable and "允许" or "禁止"),
           0x8FF0A4)
-        log_append("-> 配置已改, 按 [2 重建自启动] 才落到 /data/rc", 0xFFD27A)
+        log_append("-> 配置已改, 按 [2 应用自启动] 才落到 /data/rc", 0xFFD27A)
       end
       refresh_status()
       render_rows()
@@ -2051,6 +2186,72 @@ local function hook_restore()
   return true, "已还原"
 end
 
+-- ============ 性能层：给上面那段（逐字节搬来的）flash 函数套一层记忆化 ============
+-- ★ 为什么包在**外面**：上面那段是从旧安装器逐字节搬过来的，一个字母都不许改
+--   （移植门会证明"抽出来的 == 源里的"）。所以优化只能"包一层"，不能动里面的字。
+-- ★ 两处开销（2026-10-24 离线量：进一次自启动页 = 8 个进程 + 4 次 32KB 读）：
+--   ① flash_gate 每次都把 ORIG / PAY 各算一遍 adler32 —— 两个 32KB，
+--      共 65,536 次逐字节取模。可这两块是**常量**，一次运行里不可能变。
+--   ② flash_probe 每次都把**三个候选**全读一遍（3×rm + 3×dd + 3×32KB 读）。
+--      一旦认出是哪一块（FLASH_TARGET），下次只要**复核那一块**就够了。
+-- ★ 全部塞进一张表：主 chunk 的 local 已经贴着 Lua 的 200 个上限，能省一个是一个。
+local FM = {}
+FM.raw_gate, FM.raw_probe = flash_gate, flash_probe
+
+flash_gate = function()
+  -- ★ 只记**成功**：失败有可能是瞬时的（getprop 那份临时文件没写成 / 那一刻读不到），
+  --   老行为是"每次重问一遍"⇒ 能自愈。把失败也钉死会让一次偶发读失败变成整场禁用。
+  if FM.gate then return FM.gate[1], FM.gate[2] end
+  local ok, why = FM.raw_gate()
+  if ok then FM.gate = { ok, why } end
+  return ok, why
+end
+
+function FM.good(st)
+  return st == "原样" or st == "已装" or st == "==原块" or st == "==载荷"
+end
+
+-- 读一个候选块并判状态，好就返回 (best, 短串)。日志行也在这里出。
+function FM.hit(c)
+  local st, det = flash_state(flash_read(c.dev, c.off))
+  if not FM.good(st) then return nil end
+  local best = { dev = c.dev, off = c.off, name = c.name, state = st }
+  FLASH_TARGET = best
+  print(string.format("[chaos-installer] probe %s -> %s  %s", c.name, st, det))
+  return best, c.name .. ":" .. st
+end
+
+-- 只读候选块、**撞到第一个"好"的就收工**。选块规则与 FM.raw_probe 完全一致
+-- （它也是"第一个 good 的候选获胜"），只是不再为了日志把那两个白读一遍。
+-- 一个都没认出来 -> 返回 nil，交给 FM.raw_probe 做全量三候选（那时才需要三个状态）。
+function FM.first_good()
+  for _, c in ipairs(FLASH_CAND) do
+    local best, line = FM.hit(c)
+    if best then return best, line end
+  end
+  return nil
+end
+
+-- force = true 才做全量三候选探测（只在"一个都没认出来"、要看三份诊断时才有意义）。
+-- 平时：先复核已认出的那一块，再退到"撞到第一个好的就收工"。
+flash_probe = function(force)
+  if FM.probe and not force then
+    local best, line = FM.hit(FM.probe)
+    if best then return best, line end
+    FM.probe = nil         -- 认出的那块变了 / 读不到 -> 重新找
+  end
+  if not force then
+    local best, line = FM.first_good()
+    if best then
+      FM.probe = { dev = best.dev, off = best.off, name = best.name }
+      return best, line
+    end
+  end
+  local best, line = FM.raw_probe()
+  FM.probe = best and { dev = best.dev, off = best.off, name = best.name } or nil
+  return best, line
+end
+
 -- ============ 自启动页的状态摘要（照 shellpp2 的自启动页，2026-10-04）============
 -- 用户要的三样：**开关状态 / 是否安装 / 模块状态（装了/会跑几个）**。
 -- ★ 唯一要"读设备"的是「是否安装」（init rc 在 flash 里装没装）—— flash 是唯一真相：
@@ -2093,12 +2294,14 @@ local function as_status_lines()
   -- ④ 模块状态：装了几个（rc.d 里几个 .sh）/ 会跑几个（/data/rc 里几行生成行）
   local np = 0
   for _, m in ipairs(MODS) do if m.present then np = np + 1 end end
-  local st, gen, others = rc_state()
+  -- ★ 一次读盘给下面两处用（rc_state + rc_pending），以前各读一次。
+  local rc_cur = read_all(RC_PATH)
+  local st, gen, others = rc_state(rc_cur)
   L[#L + 1] = "模块: 装了 " .. np .. " 个, 会跑 " .. gen .. " 个"
   L[#L + 1] = "rc:   " .. (st == "可读" and ("生成 " .. gen .. " 行, 别人的 " .. others .. " 行")
-    or (st == "无" and "不存在 (按 [重建] 会建出来)" or "读不出来 (重建会被拒)"))
-  L[#L + 1] = "配置: " .. (CFG_OK and (CFG_FILE .. " 在") or "建不出来 -> 重建会被拒")
-  L[#L + 1] = rc_pending() and "重载: ● 待重建 -> 按 [2 重建自启动]"
+    or (st == "无" and "不存在 (按 [应用] 会建出来)" or "读不出来 (应用会被拒)"))
+  L[#L + 1] = "配置: " .. (CFG_OK and (CFG_FILE .. " 在") or "建不出来 -> 应用会被拒")
+  L[#L + 1] = rc_pending(rc_cur) and "重载: ● 待应用 -> 按 [2 应用自启动]"
     or "重载: 已同步"
   return L
 end
@@ -2174,7 +2377,7 @@ local function do_init_install()
   if CFG_OK then
     do_rebuild()
   else
-    log_append("-> 配置不可用, 不重建 /data/rc", 0xFF9A9A)
+    log_append("-> 配置不可用, 不应用 /data/rc", 0xFF9A9A)
     bad = true
     refresh_status() render_rows()
   end
@@ -2266,6 +2469,10 @@ local log_page       = make_page()
 local PAGES = { main_page, autostart_page, modules_page, log_page }
 
 local function show_only(target)
+  -- ★ toast 的生命周期跟着"下一次交互"走：切页就收掉（平台没有可用定时器）。
+  if UI.toast_hide then UI.toast_hide() end
+  -- ★ 日志页的可见性一变，log_append 就该知道还要不要重排那个大 Label。
+  log_page_on = (target == log_page)
   for _, page in ipairs(PAGES) do
     page:set { align = { type = lvgl.ALIGN.CENTER, x_ofs = 0,
       y_ofs = (page == target) and 0 or PAGE_HIDE } }
@@ -2284,7 +2491,10 @@ local function show_autostart()
 end
 -- 「列表为空」只报一次：show_modules 每次切页都会被调，不设闸会把日志刷满。
 local warned_empty = false
-local function show_modules()   armed = "" show_only(modules_page)   render_rows()
+local function show_modules()   armed = "" show_only(modules_page)
+  -- ★ 每次进页面都把三个浮层收起来（详情/键盘/排序模式不跨页存活）。
+  UI.close_all()
+  render_rows()
   if mod_list_top then mod_list_top() end
   -- ★ 用户要的是"没安装就不显示"——不显示是对的，但光有一片空白说不清**为什么**空。
   --   （"一条都没有"和"读了但没读出来"在界面上一模一样。）这里补一句话，只说一次。
@@ -2293,7 +2503,14 @@ local function show_modules()   armed = "" show_only(modules_page)   render_rows
     log_append("模块列表为空: " .. RC_DIR .. " 里没有 .sh, /data/rc 里也没有模块行", 0xFFD27A)
   end
 end
-local function show_log()       armed = "" show_only(log_page)       scroll_log_bottom() end
+local function show_log()
+  armed = "" show_only(log_page)
+  -- ★ 平时不重排（见 log_page_on），进这个页才把内存里的全量日志一次性刷上去。
+  if log_label then
+    log_label:set { text = table.concat(log_lines, "\n"), text_color = log_color }
+  end
+  scroll_log_bottom()
+end
 
 -- ---------- 日志页 ----------
 local back_log = lvgl.Object(log_page, {
@@ -2304,7 +2521,7 @@ back_log:clear_flag(lvgl.FLAG.SCROLLABLE)
 back_log:add_flag(lvgl.FLAG.CLICKABLE)
 lvgl.Label(back_log, {
   text = "< 返回", text_color = C_TXT, align = lvgl.ALIGN.CENTER,
-  text_font = lvgl.Font(F_BODY, 20),
+  text_font = font(F_BODY, 20),
 })
 back_log:onClicked(show_main)
 
@@ -2316,14 +2533,14 @@ clear_button:clear_flag(lvgl.FLAG.SCROLLABLE)
 clear_button:add_flag(lvgl.FLAG.CLICKABLE)
 lvgl.Label(clear_button, {
   text = "清空", text_color = C_TXT, align = lvgl.ALIGN.CENTER,
-  text_font = lvgl.Font(F_BODY, 20),
+  text_font = font(F_BODY, 20),
 })
 clear_button:onClicked(function()
   log_lines, log_seq = {}, 0
   local f = io.open(MGR_LOG, "w")
   if f then f:write("") pcall(f.close, f) end
   -- 三个地方看到的必须是**同一份**：留个 00 号占位，别让两个小窗显示"(就绪)"那种假状态。
-  log_lines = { "00  日志已清空" }
+  log_lines = { "000  日志已清空" }
   if log_label then
     log_label:set { text = log_lines[1], text_color = C_DIM }
   end
@@ -2334,7 +2551,7 @@ end)
 --   上一版标题写在 x=236、宽 100 ⇒ 234..324，**压住清空键 16px**（用户报的"标题重合"）。
 --   现在 256 起、宽 68（两个字 + 边距），与清空键留 8px 缝。
 lvgl.Label(log_page, {
-  text = "日志", text_color = C_TXT, text_font = lvgl.Font(F_BOLD, 24),
+  text = "日志", text_color = C_TXT, text_font = font(F_BOLD, 24),
   width = 68, align = { type = lvgl.ALIGN.TOP_LEFT, x_ofs = 256, y_ofs = 20 },
 })
 
@@ -2347,7 +2564,7 @@ local log_body = lvgl.Object(log_page, {
 log_body:add_flag(lvgl.FLAG.SCROLLABLE)
 log_label = lvgl.Label(log_body, {
   text = "(还没有事件)", text_color = C_DIM, width = 296,
-  text_font = lvgl.Font(F_BODY, 18),
+  text_font = font(F_BODY, 18),
   align = { type = lvgl.ALIGN.TOP_LEFT, x_ofs = 0, y_ofs = 0 },
 })
 scroll_log_bottom = function()
@@ -2369,29 +2586,49 @@ local back_mod = lvgl.Object(modules_page, {
 })
 back_mod:clear_flag(lvgl.FLAG.SCROLLABLE)
 back_mod:add_flag(lvgl.FLAG.CLICKABLE)
-lvgl.Label(back_mod, {
+UI.back = back_mod
+UI.back_lbl = lvgl.Label(back_mod, {
   text = "< 返回", text_color = C_TXT, align = lvgl.ALIGN.CENTER,
-  text_font = lvgl.Font(F_BODY, 20),
+  text_font = font(F_BODY, 20),
 })
-back_mod:onClicked(show_main)
+-- ★ 返回键的语义随模式变（用户 2026-10-24 要求）：
+--   排序模式 = 保存；批量模式 = 放弃并退出（留在模块页）；延迟管理 = 关掉那一页；
+--   其余情况 = 回主页。
+back_mod:onClicked(function()
+  if UI.mode == "order" then
+    UI.save()
+    return                 -- ★ 保存后**留在模块页**（用户 2026-10-24 要求），不回主页
+  elseif UI.mode == "batch" then
+    UI.batch_cancel()
+    return
+  elseif UI.mode == "delaymenu" then
+    UI.delay_show(false)
+    return
+  elseif UI.mode == "delay" then
+    UI.delay_cancel()
+    return
+  end
+  show_main()
+end)
 
 -- ★ 标题带上带项数：滚动翻页之后没有"x/y"页码了，"一共几项"必须还在某处看得见。
 --   宽度算过：font 24 下 4 个汉字 96px + " 12" 约 26px = 122 ≤ 130 ✓
 local mod_title = lvgl.Label(modules_page, {
-  text = "模块管理 0", text_color = C_TXT, text_font = lvgl.Font(F_BOLD, 24),
+  text = "模块管理 0", text_color = C_TXT, text_font = font(F_BOLD, 24),
   width = 130, align = { type = lvgl.ALIGN.TOP_LEFT, x_ofs = 196, y_ofs = 18 },
 })
 
 local ROWS = {}
 
--- 可滚列表容器：312 × 340 落在屏幕 62..402 之间，内容高 = ROW_POOL 行 × 56。
--- ★ SCROLLABLE 只加在**这个容器**上（页面本身在 make_page 里已经 clear_flag 掉了）。
+-- 可滚列表容器：312 × 340 落在屏幕 62..402 之间，内容高 = 真模块数 × 56（见 render_rows）。
+-- ★ SCROLLABLE **不在这里加**：默认不滚，只有一屏放不下（#MODS > ROWS_VISIBLE）时才由
+--   render_rows() 打开（2026-10-24 用户要求）。页面本身在 make_page 里已经 clear_flag 掉了。
 local mod_list = lvgl.Object(modules_page, {
   w = 312, h = 340, bg_color = C_BG, bg_opa = lvgl.OPA(100),
   radius = 0, border_width = 0, pad_all = 0,
   align = { type = lvgl.ALIGN.TOP_MID, x_ofs = 0, y_ofs = 62 },
 })
-mod_list:add_flag(lvgl.FLAG.SCROLLABLE)
+mod_list:clear_flag(lvgl.FLAG.SCROLLABLE)
 
 -- ★ 行内布局（**按像素算**，312×50 的方框，内边距 0）——
 --   用户 2026-10-04 报"chaos 文字 / 允许 文字 / 方框没对齐"，根因是**行对象没写 pad_all**：
@@ -2414,24 +2651,27 @@ for i = 1, ROW_POOL do
   row:add_flag(lvgl.FLAG.CLICKABLE)
   local name_lbl = lvgl.Label(row, {
     text = "", text_color = C_TXT, width = 180, height = 24,
-    text_font = lvgl.Font(F_BODY, 18),
+    text_font = font(F_BODY, 18),
     align = { type = lvgl.ALIGN.CENTER, x_ofs = -54, y_ofs = -11 },
   })
   local desc_lbl = lvgl.Label(row, {
     text = "", text_color = C_TXT3, width = 180, height = 18,
-    text_font = lvgl.Font(F_BODY, 13),
+    text_font = font(F_BODY, 13),
     align = { type = lvgl.ALIGN.CENTER, x_ofs = -54, y_ofs = 13 },
   })
   local st_lbl = lvgl.Label(row, {
     text = "", text_color = C_DIM, width = 96, height = 22,
-    text_font = lvgl.Font(F_BODY, 16),
+    text_font = font(F_BODY, 16),
     align = { type = lvgl.ALIGN.CENTER, x_ofs = 96, y_ofs = 0 },
   })
   local slot = i
   row:onClicked(function()
-    -- ★ 滚动之后"行号 == 模块下标"，不再有页码偏移（page_no 已经删掉了）。
-    local m = MODS[slot]
-    if m then toggle_mod(m.name) end
+    -- ★ 2026-10-24：普通模式点一行 = 打开**详情浮层**；批量模式 = 只改开关（不落盘）；
+    --   顺序模式 = 选中（Windows 语言列表那种手感）。
+    if not MODS[slot] then return end
+    if UI.mode == "order" then UI.pick(slot)
+    elseif UI.mode == "batch" then UI.toggle_pending(slot)
+    else UI.open(slot) end
   end)
   ROWS[i] = { row = row, name = name_lbl, desc = desc_lbl, st = st_lbl }
 end
@@ -2454,9 +2694,10 @@ local function make_bar_button(text, x_ofs, color, fn)
   b:add_flag(lvgl.FLAG.CLICKABLE)
   lvgl.Label(b, {
     text = text, text_color = C_TXT, align = lvgl.ALIGN.CENTER,
-    text_font = lvgl.Font(F_BODY, 18),
+    text_font = font(F_BODY, 18),
   })
   b:onClicked(function()
+    if UI.toast_hide then UI.toast_hide() end
     log_append("点击 [" .. text .. "]", 0xBFD9FF)
     local ok, message = pcall(fn)
     if not ok then log_append("Error: " .. tostring(message), 0xFF9A9A) end
@@ -2465,20 +2706,601 @@ local function make_bar_button(text, x_ofs, color, fn)
   return b
 end
 
-make_bar_button("全部启用", 12,  C_GREEN, function() set_all(true)  end)
-make_bar_button("重建",     118, C_RED,   do_rebuild)
-make_bar_button("全部禁止", 224, C_DRED,  function() set_all(false) end)
+-- ★ 功能条有三套（2026-10-24 用户要求）：
+--     常态：批量管理 / 应用 / 延迟管理
+--     批量：全部启用 / 保存 / 全部禁止
+--     排序：上移 / 下移（占中间两格）
+--   三套都是预建的，靠 y_ofs 挪出屏幕切换 —— 不做增删。
+UI.bar_x = { 12, 118, 224 }
+UI.bar = {}
+UI.bar[1] = make_bar_button("批量管理", UI.bar_x[1], C_BLUE,  function() UI.batch_enter() end)
+UI.bar[2] = make_bar_button("应用",     UI.bar_x[2], C_RED,   function()
+  do_rebuild()
+  -- 只有"配置与 /data/rc 已经一致"才算真的应用成功（拒绝/漏写时日志里另有提示）
+  if not rc_pending() then UI.toast_show("已应用更改") end
+end)
+UI.bar[3] = make_bar_button("延迟管理", UI.bar_x[3], C_OLIVE, function() UI.delay_show(true) end)
+UI.bbar = {}
+UI.bbar[1] = make_bar_button("全部启用", UI.bar_x[1], C_GREEN, function() UI.all_pending(true)  end)
+UI.bbar[2] = make_bar_button("保存",     UI.bar_x[2], C_BLUE,  function() UI.batch_save() end)
+UI.bbar[3] = make_bar_button("全部禁止", UI.bar_x[3], C_DRED,  function() UI.all_pending(false) end)
+UI.ord_up = make_bar_button("上移", 62,  C_BLUE,  function() UI.move(-1) end)
+UI.ord_dn = make_bar_button("下移", 174, C_SLATE, function() UI.move(1)  end)
+
+-- 切换功能条：which = "normal" | "batch" | "order"
+function UI.setbar(which)
+  local function place(b, on, x)
+    b:set { align = { type = lvgl.ALIGN.TOP_LEFT, x_ofs = x, y_ofs = on and 406 or PAGE_HIDE } }
+  end
+  for i = 1, 3 do
+    place(UI.bar[i],  which == "normal", UI.bar_x[i])
+    place(UI.bbar[i], which == "batch",  UI.bar_x[i])
+  end
+  place(UI.ord_up, which == "order", 62)
+  place(UI.ord_dn, which == "order", 174)
+end
+
+-- ===================== 三个浮层：详情 / 数字键盘 / 顺序模式（2026-10-24）=============
+-- ★ 全部**预建**、靠 y_ofs 挪出屏幕（PAGE_HIDE）来隐藏 —— 本项目的 LVGL Lua 上
+--   "动态增删子对象"没验过，不能 delete。后建的画在上面 ⇒ 三块必须排在列表和功能条之后。
+
+-- 面板里通用的小按钮：w/x 不传就水平居中于 300 宽的面板
+-- ★ 设备上的 lv_obj 是 userdata，**不能挂自定义字段**（`b.lbl = …` 会报
+--   "attempt to index a lv_obj value"）。所以"按钮 → 它的文字 label"用侧表存。
+UI.lbl, UI.val = {}, {}
+
+function UI.mkbtn(parent, text, y, color, w, x, fs)
+  w = w or 260
+  x = x or math.floor((300 - w) / 2)
+  local b = lvgl.Object(parent, {
+    w = w, h = 44, bg_color = color, bg_opa = lvgl.OPA(100), radius = 12, pad_all = 0,
+    align = { type = lvgl.ALIGN.TOP_LEFT, x_ofs = x, y_ofs = y },
+  })
+  b:clear_flag(lvgl.FLAG.SCROLLABLE)
+  b:add_flag(lvgl.FLAG.CLICKABLE)
+  UI.lbl[b] = lvgl.Label(b, {
+    text = text, text_color = C_TXT, align = lvgl.ALIGN.CENTER,
+    text_font = font(F_BODY, fs or 18),
+  })
+  return b
+end
+
+-- ---------- ① 详情浮层（300×396，比页面小一圈）----------
+UI.det = {}
+UI.det.panel = lvgl.Object(modules_page, {
+  w = 300, h = 396, bg_color = C_CARD, bg_opa = lvgl.OPA(100), radius = 18,
+  border_width = 2, border_color = C_LINE, pad_all = 0,
+  align = { type = lvgl.ALIGN.CENTER, x_ofs = 0, y_ofs = PAGE_HIDE },
+})
+UI.det.title = lvgl.Label(UI.det.panel, {
+  text = "", text_color = C_TXT, width = 268, height = 30,
+  text_font = font(F_BOLD, 20),
+  align = { type = lvgl.ALIGN.TOP_LEFT, x_ofs = 16, y_ofs = 12 },
+})
+UI.det.l1 = lvgl.Label(UI.det.panel, {
+  text = "", text_color = C_TXT, width = 268, height = 22, text_font = font(F_BODY, 15),
+  align = { type = lvgl.ALIGN.TOP_LEFT, x_ofs = 16, y_ofs = 48 },
+})
+UI.det.l2 = lvgl.Label(UI.det.panel, {
+  text = "", text_color = C_TXT, width = 268, height = 22, text_font = font(F_BODY, 15),
+  align = { type = lvgl.ALIGN.TOP_LEFT, x_ofs = 16, y_ofs = 70 },
+})
+UI.det.l3 = lvgl.Label(UI.det.panel, {
+  text = "", text_color = C_TXT, width = 268, height = 22, text_font = font(F_BODY, 15),
+  align = { type = lvgl.ALIGN.TOP_LEFT, x_ofs = 16, y_ofs = 92 },
+})
+UI.det.l4 = lvgl.Label(UI.det.panel, {
+  text = "", text_color = C_TXT, width = 268, height = 22, text_font = font(F_BODY, 15),
+  align = { type = lvgl.ALIGN.TOP_LEFT, x_ofs = 16, y_ofs = 114 },
+})
+UI.det.b1 = UI.mkbtn(UI.det.panel, "关闭模块",    140, C_GREEN)
+UI.det.b2 = UI.mkbtn(UI.det.panel, "调整延迟时间", 186, C_BLUE)
+UI.det.b3 = UI.mkbtn(UI.det.panel, "调整启动顺序", 232, C_SLATE)
+UI.det.close = UI.mkbtn(UI.det.panel, "关闭", 300, C_DRED, 260, nil, 16)
+UI.det.b1:onClicked(function() UI.toggle()       end)
+UI.det.b2:onClicked(function() UI.delay_open("mod") end)
+UI.det.b3:onClicked(function() UI.order_start()  end)
+UI.det.close:onClicked(function() UI.close_all() end)
+
+-- ---------- ② 延迟管理页（整页浮层，复用下面那个键盘）----------
+-- 两个窗口的秒数：pre = 扣闸之后、第一个普通模块之前（默认 8）；post = 全部跑完、放行之前（默认 15）。
+function UI.mkcard(parent, title, y, fn)
+  local c = lvgl.Object(parent, {
+    w = 312, h = 92, bg_color = C_CARD, bg_opa = lvgl.OPA(100), radius = 14,
+    border_width = 1, border_color = C_LINE, pad_all = 0,
+    align = { type = lvgl.ALIGN.TOP_LEFT, x_ofs = 12, y_ofs = y },
+  })
+  c:clear_flag(lvgl.FLAG.SCROLLABLE)
+  c:add_flag(lvgl.FLAG.CLICKABLE)
+  lvgl.Label(c, {
+    text = title, text_color = C_DIM, text_font = font(F_BODY, 16),
+    align = { type = lvgl.ALIGN.TOP_LEFT, x_ofs = 16, y_ofs = 14 },
+  })
+  UI.val[c] = lvgl.Label(c, {
+    text = "8 秒", text_color = C_TXT, text_font = font(F_BOLD, 30),
+    align = { type = lvgl.ALIGN.TOP_LEFT, x_ofs = 16, y_ofs = 44 },
+  })
+  c:onClicked(fn)
+  return c
+end
+
+UI.dp = {}
+UI.dp.panel = lvgl.Object(modules_page, {
+  w = 336, h = 480, bg_color = C_BG, bg_opa = lvgl.OPA(100), radius = 0,
+  border_width = 0, pad_all = 0,
+  align = { type = lvgl.ALIGN.CENTER, x_ofs = 0, y_ofs = PAGE_HIDE },
+})
+UI.dp.back = lvgl.Object(UI.dp.panel, {
+  w = 120, h = 44, bg_color = C_SLATE, bg_opa = lvgl.OPA(100), radius = 12, pad_all = 0,
+  align = { type = lvgl.ALIGN.TOP_LEFT, x_ofs = 12, y_ofs = 10 },
+})
+UI.dp.back:clear_flag(lvgl.FLAG.SCROLLABLE)
+UI.dp.back:add_flag(lvgl.FLAG.CLICKABLE)
+lvgl.Label(UI.dp.back, {
+  text = "< 返回", text_color = C_TXT, align = lvgl.ALIGN.CENTER,
+  text_font = font(F_BODY, 20),
+})
+UI.dp.back:onClicked(function() UI.delay_show(false) end)
+lvgl.Label(UI.dp.panel, {
+  text = "延迟管理", text_color = C_TXT, text_font = font(F_BOLD, 24),
+  width = 130, align = { type = lvgl.ALIGN.TOP_LEFT, x_ofs = 196, y_ofs = 18 },
+})
+UI.dp.b1 = UI.mkcard(UI.dp.panel, "启动前延迟", 96,
+  function() UI.delay_open("pre") end)
+UI.dp.b2 = UI.mkcard(UI.dp.panel, "启动后延迟", 208,
+  function() UI.delay_open("post") end)
+lvgl.Label(UI.dp.panel, {
+  text = "改完按 [应用] 才写进 /data/rc", text_color = C_TXT3,
+  text_font = font(F_BODY, 14), width = 312,
+  align = { type = lvgl.ALIGN.TOP_LEFT, x_ofs = 12, y_ofs = 330 },
+})
+
+-- ---------- ③ 数字键盘（模块延迟 / 两个窗口共用）----------
+UI.kp = {}
+UI.kp.panel = lvgl.Object(modules_page, {
+  w = 300, h = 390, bg_color = C_CARD, bg_opa = lvgl.OPA(100), radius = 18,
+  border_width = 2, border_color = C_LINE, pad_all = 0,
+  align = { type = lvgl.ALIGN.CENTER, x_ofs = 0, y_ofs = PAGE_HIDE },
+})
+UI.kp.title = lvgl.Label(UI.kp.panel, {
+  text = "延迟时间（秒）", text_color = C_DIM, text_font = font(F_BODY, 14),
+  align = { type = lvgl.ALIGN.TOP_MID, x_ofs = 0, y_ofs = 12 },
+})
+UI.kp.disp = lvgl.Label(UI.kp.panel, {
+  text = "1", text_color = C_TXT, text_font = font(F_BOLD, 40),
+  align = { type = lvgl.ALIGN.TOP_MID, x_ofs = 0, y_ofs = 38 },
+})
+UI.kp.keys = {}
+for k = 1, 12 do
+  local label = ({ "1", "2", "3", "4", "5", "6", "7", "8", "9",
+    "清空", "0", "退格" })[k]
+  local col, row = (k - 1) % 3, math.floor((k - 1) / 3)
+  local b = UI.mkbtn(UI.kp.panel, label, 122 + row * 52, C_SLATE, 80, 20 + col * 90, 18)
+  b:onClicked(function() UI.key(label) end)
+  UI.kp.keys[k] = b
+end
+UI.kp.cancel = UI.mkbtn(UI.kp.panel, "取消", 332, C_DRED, 120, 20, 16)
+UI.kp.ok = UI.mkbtn(UI.kp.panel, "确定", 332, C_GREEN, 120, 160, 16)
+UI.kp.cancel:onClicked(function() UI.delay_cancel() end)
+UI.kp.ok:onClicked(function() UI.delay_ok()     end)
+
+-- ---------- ④ toast（屏幕下方的胶囊提示，照"米环管理"那种）----------
+-- ★ 平台没有可用的定时器 ⇒ 不自动消隐；下一次点任何键 / 切页时由 UI.toast_hide() 收掉。
+UI.toast = {}
+-- ★ 定位只能用**这个平台上真正用过的**对齐常量：全仓 170 处 CENTER、66 处 TOP_LEFT、
+--   23 处 TOP_MID，BOTTOM_MID **一处都没有**。第一版用了 BOTTOM_MID，结果整个面板
+--   被摆到屏幕外 —— 这就是"toast 完全不显示"的原因（nil 常量 ⇒ align.type 为空）。
+--   现在用 CENTER + y_ofs=+128（中线往下 128 ⇒ 面板 352..404，正好压在功能条上沿之上，
+--   不挡按钮）。
+UI.toast.y = 128
+UI.toast.panel = lvgl.Object(modules_page, {
+  w = 250, h = 52, bg_color = C_SLATE, bg_opa = lvgl.OPA(100), radius = 26,
+  border_width = 0, pad_all = 0,
+  align = { type = lvgl.ALIGN.CENTER, x_ofs = 0, y_ofs = PAGE_HIDE },
+})
+UI.toast.lbl = lvgl.Label(UI.toast.panel, {
+  text = "", text_color = C_TXT, align = lvgl.ALIGN.CENTER,
+  text_font = font(F_BODY, 16),
+})
+-- ★ 2 秒后自动消失 —— 用平台自带的 lvgl.Timer。写法照 Canopus / Shell++ 安装器里那套：
+--     lvgl.Timer{ period=ms, repeat_count=-1, paused=true, cb=… } → resume() → ready()
+--   没有这个 API 的固件（以及离线假环境）就退化成"下次交互时收掉"，不会崩。
+UI.toast_ms = 2000
+UI.toast_timer = nil
+
+function UI.toast_hide()
+  if UI.toast_timer then
+    local t = UI.toast_timer
+    UI.toast_timer = nil
+    pcall(function() t:delete() end)
+  end
+  UI.toast.panel:set { align = { type = lvgl.ALIGN.CENTER, x_ofs = 0, y_ofs = PAGE_HIDE } }
+end
+
+function UI.toast_show(msg)
+  if UI.toast_timer then            -- 上一条还没走完：先撤掉它的定时器，免得提前把新的关掉
+    local old = UI.toast_timer
+    UI.toast_timer = nil
+    pcall(function() old:delete() end)
+  end
+  UI.toast.lbl:set { text = one_line_w(msg, 28), text_color = C_TXT }
+  UI.toast.panel:set { align = { type = lvgl.ALIGN.CENTER, x_ofs = 0, y_ofs = UI.toast.y } }
+  print("[10pro.autorun] toast: " .. tostring(msg))   -- 平台 stdout，便于确认"到底弹没弹"
+  if type(lvgl.Timer) ~= "function" then return end
+  UI.toast_t0 = os.time()
+  local ok, t = pcall(lvgl.Timer, {
+    period = 1000, repeat_count = -1, paused = true,
+    -- ★ 每秒看一次表，满 2 秒才收 —— 有些固件的 Timer 第一拍会当场到点，
+    --   靠 period=2000 一次命中并不稳；用 os.time 兜底，早到的那几拍直接忽略。
+    cb = function(timer)
+      local now = os.time()
+      if type(now) == "number" and type(UI.toast_t0) == "number"
+         and now - UI.toast_t0 < 2 then
+        return
+      end
+      UI.toast_timer = nil
+      pcall(function() timer:delete() end)
+      UI.toast.panel:set { align = { type = lvgl.ALIGN.CENTER, x_ofs = 0, y_ofs = PAGE_HIDE } }
+    end,
+  })
+  if ok and t then
+    UI.toast_timer = t
+    pcall(function() t:resume() end)
+    pcall(function() t:ready() end)
+  end
+end
+
+-- ---------- ④ 浮层状态机 ----------
+function UI.panel_show(p, on)
+  p:set { align = { type = lvgl.ALIGN.CENTER, x_ofs = 0, y_ofs = on and 0 or PAGE_HIDE } }
+end
+
+function UI.close_all()
+  UI.mode, UI.digits, UI.prev = "", "", nil
+  UI.panel_show(UI.det.panel, false)
+  UI.panel_show(UI.kp.panel, false)
+  UI.panel_show(UI.dp.panel, false)
+  UI.setbar("normal")
+  UI.back_lbl:set { text = "< 返回" }
+  UI.back:set { bg_color = C_SLATE }
+  rows_sig = nil
+  if render_rows then render_rows() end
+end
+
+-- 时间戳 -> "10-24 15:10"（os.date 不在就退回数字；绝不因为格式化把界面弄崩）
+function UI.fmt(t)
+  if type(t) ~= "number" or t <= 0 then return "—" end
+  local ok, s = pcall(os.date, "%m-%d %H:%M", t)
+  if ok and type(s) == "string" then return s end
+  return tostring(t)
+end
+
+function UI.refresh_detail()
+  local m = MODS[UI.sel]
+  if not m then return end
+  UI.det.title:set { text = one_line(m.name, 14), text_color = C_TXT }
+  local st
+  if m.core then st = "核心（不可改）"
+  elseif not m.present then st = "缺脚本"
+  elseif m.enable then st = "允许"
+  else st = "禁止" end
+  UI.det.l1:set { text = "状态: " .. st .. (m.top and "   · #top 特权" or ""),
+    text_color = C_TXT }
+  local d = math.floor(tonumber(m.delay) or 1)
+  if d < 1 then d = 1 end
+  UI.det.l2:set { text = m.top and "延迟: —（特权模块不等待）" or ("延迟: " .. d .. " 秒"),
+    text_color = m.top and C_TXT3 or C_TXT }
+  local sz = "—"
+  if m.present then
+    local body = read_all(RC_DIR .. "/" .. m.name .. ".sh", "r")
+    if type(body) == "string" then sz = #body .. " B" end
+  end
+  UI.det.l3:set { text = "脚本: " .. sz, text_color = C_TXT }
+  UI.det.l4:set { text = "安装: " .. UI.fmt(m.installed), text_color = C_TXT }
+  UI.lbl[UI.det.b1]:set { text = m.enable and "关闭模块" or "开启模块" }
+  UI.det.b1:set { bg_color = m.enable and C_DRED or C_GREEN }
+  -- 特权模块：延迟 / 顺序两个键变灰，点了只给一句提示
+  UI.det.b2:set { bg_color = m.top and C_GRAY or C_BLUE }
+  UI.det.b3:set { bg_color = m.top and C_GRAY or C_SLATE }
+end
+
+function UI.open(i)
+  if not MODS[i] then return end
+  UI.toast_hide()
+  UI.mode, UI.sel = "detail", i
+  UI.refresh_detail()
+  UI.panel_show(UI.kp.panel, false)
+  UI.panel_show(UI.det.panel, true)
+end
+
+function UI.toggle()
+  if UI.mode ~= "detail" then return end
+  local m = MODS[UI.sel]
+  if not m then return end
+  toggle_mod(m.name)      -- 复用既有动作：写配置 + 记日志 + 刷列表 + 刷状态行
+  UI.refresh_detail()
+end
+
+-- 当前键盘改的是谁：kind = "mod"（模块自己的延迟）| "pre" | "post"（两个窗口）
+function UI.cur_val()
+  if UI.kind == "pre" then return math.floor(CFG.pre) end
+  if UI.kind == "post" then return math.floor(CFG.post) end
+  local m = MODS[UI.sel]
+  return math.floor(tonumber(m and m.delay) or 1)
+end
+
+function UI.delay_open(kind)
+  local m = MODS[UI.sel]
+  if kind == "mod" then
+    if UI.mode ~= "detail" then return end
+    if not m then return end
+    if m.top then
+      log_append("[" .. m.name .. "] 是 #top 特权模块, 不允许调延迟", 0xFFD27A)
+      return
+    end
+  else
+    if UI.mode ~= "delaymenu" then return end
+  end
+  UI.kind, UI.prev = kind, UI.mode
+  UI.mode = "delay"
+  UI.digits = tostring(UI.cur_val())     -- ★ 预填：直接按确定也生效（不会再"点了没反应"）
+  UI.kp.disp:set { text = UI.digits, text_color = C_TXT }
+  UI.panel_show(UI.det.panel, false)
+  UI.panel_show(UI.dp.panel, false)
+  UI.panel_show(UI.kp.panel, true)
+end
+
+function UI.key(k)
+  if UI.mode ~= "delay" then return end
+  if k == "清空" then
+    -- ★ 以前清空后显示会回落到"当前值"，看着像没生效；现在就是**抹掉全部**，屏幕留空
+    UI.digits = ""
+  elseif k == "退格" then
+    UI.digits = UI.digits:sub(1, math.max(0, #UI.digits - 1))
+  elseif #UI.digits < 3 then
+    UI.digits = UI.digits .. k          -- 最多三位：1..100
+  end
+  UI.kp.disp:set { text = UI.digits, text_color = C_TXT }
+end
+
+-- 确定：写回并**立刻落盘**（模块延迟 / 两个窗口都是显式动作）
+function UI.delay_ok()
+  if UI.mode ~= "delay" then return end
+  local v = tonumber(UI.digits)
+  if not v then                          -- 清空后直接按确定：给句话，不要没反应
+    UI.toast_show("请先输入数字")
+    return
+  end
+  v = math.floor(v)
+  if v < 1 or v > 100 then               -- 不静默夹紧，明确告诉用户范围
+    UI.toast_show("不能小于 1 或大于 100")
+    return
+  end
+  local label
+  if UI.kind == "pre" or UI.kind == "post" then
+    CFG[UI.kind] = v
+    label = (UI.kind == "pre" and "启动前延迟 " or "启动后延迟 ") .. v .. " 秒"
+  else
+    local m = MODS[UI.sel]
+    if not m then return end
+    m.delay = v
+    label = "[" .. m.name .. "] 延迟 " .. v .. " 秒"
+  end
+  local ok, err = save_policy(MODS, _policy.version)
+  if ok then log_append(label .. " 已保存", 0x8FF0A4)
+  else log_append("回写失败: " .. tostring(err), 0xFF9A9A) end
+  UI.digits = ""
+  UI.mode = UI.prev or "detail"
+  UI.panel_show(UI.kp.panel, false)
+  if UI.mode == "delaymenu" then
+    UI.delay_show(true)
+  else
+    UI.refresh_detail()
+    UI.panel_show(UI.det.panel, true)
+  end
+  rows_sig = nil
+  render_rows()
+  refresh_status()
+end
+
+function UI.delay_cancel()
+  if UI.mode ~= "delay" then return end
+  UI.digits = ""
+  UI.mode = UI.prev or "detail"
+  UI.panel_show(UI.kp.panel, false)
+  if UI.mode == "delaymenu" then
+    UI.delay_show(true)
+  else
+    UI.refresh_detail()
+    UI.panel_show(UI.det.panel, true)
+  end
+end
+
+-- ---------- 延迟管理页 ----------
+function UI.refresh_delay()
+  UI.val[UI.dp.b1]:set { text = CFG.pre .. " 秒", text_color = C_TXT }
+  UI.val[UI.dp.b2]:set { text = CFG.post .. " 秒", text_color = C_TXT }
+end
+
+function UI.delay_show(on)
+  if on then
+    UI.mode = "delaymenu"
+    UI.refresh_delay()
+    UI.panel_show(UI.det.panel, false)
+    UI.panel_show(UI.kp.panel, false)
+    UI.panel_show(UI.dp.panel, true)
+  else
+    UI.mode = ""
+    UI.panel_show(UI.dp.panel, false)
+    UI.panel_show(UI.kp.panel, false)
+  end
+end
+
+-- ---------- 批量管理 ----------
+-- 进入时**快照**一份开关状态：保存才写盘，返回就整份还原。
+function UI.batch_enter()
+  if UI.mode ~= "" then return end
+  UI.mode = "batch"
+  UI.snap = {}
+  for i = 1, #MODS do UI.snap[i] = MODS[i].enable end
+  UI.setbar("batch")
+  rows_sig = nil
+  render_rows()
+  log_append("批量管理: 点卡片改开关, [保存] 落盘, 返回=放弃", 0xBFD9FF)
+end
+
+function UI.all_pending(want)
+  if UI.mode ~= "batch" then return end
+  local n = 0
+  for _, m in ipairs(MODS) do
+    if not m.core and m.present and m.enable ~= want then
+      m.enable = want n = n + 1
+    end
+  end
+  rows_sig = nil
+  render_rows()
+  log_append((want and "待启用 " or "待禁止 ") .. n .. " 项 (未落盘)", 0xFFD27A)
+end
+
+function UI.toggle_pending(i)
+  if UI.mode ~= "batch" then return end
+  local m = MODS[i]
+  if not m then return end
+  if m.core then
+    log_append("[" .. m.name .. "] 是核心模块, 不给禁", 0xFFD27A)
+    return
+  end
+  if not m.present then
+    log_append("[" .. m.name .. "] 没有脚本, 不算注册", 0xFFD27A)
+    return
+  end
+  m.enable = not m.enable
+  rows_sig = nil
+  render_rows()
+end
+
+function UI.batch_save()
+  if UI.mode ~= "batch" then return end
+  local ok, err = save_policy(MODS, _policy.version)
+  if ok then
+    log_append("批量修改已保存", 0x8FF0A4)
+    UI.toast_show("已保存")
+  else
+    log_append("保存失败: " .. tostring(err), 0xFF9A9A)
+  end
+  UI.mode = ""
+  UI.setbar("normal")
+  rows_sig = nil
+  render_rows()
+  refresh_status()
+end
+
+function UI.batch_cancel()
+  if UI.mode ~= "batch" then return end
+  for i = 1, #MODS do
+    if UI.snap[i] ~= nil then MODS[i].enable = UI.snap[i] end
+  end
+  UI.mode = ""
+  UI.setbar("normal")
+  rows_sig = nil
+  render_rows()
+  log_append("批量修改已放弃", 0xFFD27A)
+end
+
+-- ---------- 顺序模式 ----------
+function UI.order_start()
+  if UI.mode ~= "detail" then return end
+  local m = MODS[UI.sel]
+  if not m then return end
+  if m.top then
+    log_append("[" .. m.name .. "] 是 #top 特权模块, 不允许调顺序", 0xFFD27A)
+    return
+  end
+  UI.mode, UI.idx = "order", UI.sel
+  UI.panel_show(UI.det.panel, false)
+  UI.back_lbl:set { text = "保存" }
+  UI.back:set { bg_color = C_GREEN }
+  UI.setbar("order")
+  rows_sig = nil
+  render_rows()
+  log_append("排序: 点一行选中, [上移]/[下移] 调位置, 左上角 [保存] 落盘", 0xBFD9FF)
+end
+
+function UI.pick(i)
+  if not MODS[i] then return end
+  UI.idx = i
+  rows_sig = nil
+  render_rows()
+end
+
+function UI.move(dir)
+  if UI.mode ~= "order" then return end
+  local i, j = UI.idx, UI.idx + dir
+  local a, b = MODS[i], MODS[j]
+  if not a or not b then return end
+  if a.top or b.top then
+    log_append("特权模块 (#top) 固定在最前, 不参与排序", 0xFFD27A)
+    return
+  end
+  MODS[i], MODS[j] = b, a
+  UI.idx = j
+  -- ★ 顺序按"位置"重编号（10/20/30…），否则下次刷新会按旧 order 排回去。
+  local k2 = 0
+  for _, m in ipairs(MODS) do
+    if not m.top then k2 = k2 + 1 m.order = k2 * 10 end
+  end
+  rows_sig = nil
+  render_rows()
+end
+
+function UI.save()
+  if UI.mode ~= "order" then return end
+  local ok, err = save_policy(MODS, _policy.version)
+  if ok then log_append("启动顺序已保存 (" .. #MODS .. " 项)", 0x8FF0A4)
+  else log_append("顺序回写失败: " .. tostring(err), 0xFF9A9A) end
+  UI.mode = ""
+  UI.back_lbl:set { text = "< 返回" }
+  UI.back:set { bg_color = C_SLATE }
+  UI.setbar("normal")
+  rows_sig = nil
+  render_rows()
+  refresh_status()
+end
+
+UI.setbar("normal")         -- 初始化：只有常态那三个键在位
 
 local warned_pool = false
+-- ★ rows_sig 在前向声明段（UI 段要清它），这里只赋初值。
+rows_sig = nil
 function render_rows()
+  -- ★ 空行一律叠到「最后一个真模块的下一格」（同一坐标，互相盖住）。
+  --   目的：**不让空行撑高滚动内容**。12 行预建时内容高恒为 12×56 = 672，
+  --   只有 2 个模块也能滚出一大片空白 —— 2026-10-24 用户报的"滚动异常"就是它。
+  --   叠到末格之后 ⇒ 内容高 = 真模块数 + 1 行（最坏多一格空白，不再是 10 格）。
+  local n = #MODS
+  if n > ROW_POOL then n = ROW_POOL end
+  local empty_y = n * (ROW_H + ROW_GAP)
+  -- ★ 内容没变就不重画（2026-10-24 性能）：进一次模块页 = 12 行 × 3 个标签，
+  --   最多 36 次 set，每次都要 LVGL 重新排版 + 重绘那一行。列表只在 MODS 变了之后
+  --   才需要重画；指纹把"影响画面的全部输入"都算进去（含总数与 ROW_POOL 之外的多余项）。
+  local sig = { tostring(#MODS), tostring(n) }
+  for i = 1, n do
+    local m = MODS[i]
+    sig[#sig + 1] = m.name .. "|" .. tostring(m.enable) .. tostring(m.core)
+      .. tostring(m.present) .. "|" .. tostring(m.order) .. "|" .. tostring(m.delay)
+      .. "|" .. tostring(m.desc) .. "|" .. tostring(m.top)
+  end
+  sig = table.concat(sig, ";")
+  if sig == rows_sig then return end
+  rows_sig = sig
   for i = 1, ROW_POOL do
     local cell = ROWS[i]
     local m = MODS[i]
     if not m then
-      -- 空行：只把颜色抹成页面底色。★ 不能"删掉/隐藏"子对象 —— 本项目的 LVGL Lua
-      -- 上没验过（add_flag(HIDDEN) 这种在假 lvgl 里也没有，赌它存在就是赌崩）。
-      -- 代价说清：滚到底会看到一段同样的空白。ROW_POOL 就是"能显示的上限"。
-      cell.row:set { bg_color = C_BG, border_color = C_BG }
+      -- 空行：颜色抹成页面底色 + 位置叠到末格之后。★ 不能"删掉/隐藏"子对象 —— 本项目的
+      -- LVGL Lua 上没验过（add_flag(HIDDEN) 这种在假 lvgl 里也没有，赌它存在就是赌崩）。
+      cell.row:set { bg_color = C_BG, border_color = C_BG,
+        align = { type = lvgl.ALIGN.TOP_MID, x_ofs = 0, y_ofs = empty_y } }
       cell.name:set { text = "", text_color = C_BG }
       cell.desc:set { text = "", text_color = C_BG }
       cell.st:set   { text = "", text_color = C_BG }
@@ -2493,12 +3315,25 @@ function render_rows()
       elseif m.enable then st_text, st_color = "允许", C_GREEN
       else st_text, st_color = "禁止", C_DRED end
       cell.name:set { text = one_line(m.name, 16), text_color = C_TXT }
-      cell.desc:set { text = one_line(m.desc ~= "" and m.desc
-        or string.format("order %d · delay %d", m.order, m.delay), 22),
+      -- ★ 特权模块不显示 order/delay（它们不参与排序与延迟），改显示"最先启动"。
+      cell.desc:set { text = one_line(m.top and "特权 · 最先启动（#top）"
+        or (m.desc ~= "" and m.desc
+          or string.format("order %d · delay %d", m.order, m.delay)), 22),
         text_color = C_TXT3 }
       cell.st:set { text = st_text, text_color = st_color }
-      cell.row:set { bg_color = C_CARD, border_color = C_LINE }
+      -- 位置每次也写回去：这一格可能刚被上一轮当空行叠到末格去了。
+      local sel = (UI.mode == "order" and UI.idx == i)
+      cell.row:set { bg_color = sel and C_BLUE or C_CARD,
+        border_color = sel and C_TXT or C_LINE,
+        align = { type = lvgl.ALIGN.TOP_MID, x_ofs = 0, y_ofs = (i - 1) * (ROW_H + ROW_GAP) } }
     end
+  end
+  -- ★ 滚动开关（2026-10-24 用户要求）：一屏放得下就**关**，放不下才**开**。
+  if n > ROWS_VISIBLE then
+    mod_list:add_flag(lvgl.FLAG.SCROLLABLE)
+  else
+    mod_list:clear_flag(lvgl.FLAG.SCROLLABLE)
+    mod_list_top()   -- 关掉滚动时把残留偏移量清掉（模块被删到一屏以内的情况）
   end
   if mod_title then
     mod_title:set { text = string.format("模块管理 %d", #MODS), text_color = C_TXT }
@@ -2527,9 +3362,10 @@ local function make_button(parent, text, y, x, w, h, color, fn, font_size, logna
   button:add_flag(lvgl.FLAG.CLICKABLE)
   lvgl.Label(button, {
     text = text, text_color = C_TXT, align = lvgl.ALIGN.CENTER,
-    text_font = lvgl.Font(F_BODY, font_size or 20),
+    text_font = font(F_BODY, font_size or 20),
   })
   button:onClicked(function()
+    if UI.toast_hide then UI.toast_hide() end
     if logname then log_append("点击 [" .. logname .. "]", 0xBFD9FF) end
     local ok, message = pcall(fn)
     if not ok then log_append("Error: " .. tostring(message), 0xFF9A9A) end
@@ -2551,7 +3387,7 @@ local function make_mini_box(parent, y_ofs, h)
   })
   box:clear_flag(lvgl.FLAG.SCROLLABLE)
   local label = lvgl.Label(box, {
-    text = "(就绪)", text_color = C_DIM, text_font = lvgl.Font(F_BODY, 14),
+    text = "(就绪)", text_color = C_DIM, text_font = font(F_BODY, 14),
     width = 288, align = { type = lvgl.ALIGN.TOP_LEFT, x_ofs = 0, y_ofs = 0 },
   })
   return label, mini_lines_of(h)
@@ -2563,19 +3399,19 @@ end
 --   键行1 h48 顶 110 -> -106               键行2 h48 顶 166 -> -50
 --   状态 h22 顶 220 -> -9                  日志框 h214 顶 252 -> 119（底 466）
 lvgl.Label(main_page, {
-  text = "10pro.autorun", text_color = C_TXT, text_font = lvgl.Font(F_BOLD, 30),
+  text = "10pro.autorun", text_color = C_TXT, text_font = font(F_BOLD, 30),
   width = 320, height = 44,
   align = { type = lvgl.ALIGN.CENTER, x_ofs = 0, y_ofs = -194 },
 })
 lvgl.Label(main_page, {
   text = "多模块开机自启管理", text_color = C_DIM,
-  text_font = lvgl.Font(F_BODY, 18),
+  text_font = font(F_BODY, 18),
   width = 320, height = 28,
   align = { type = lvgl.ALIGN.CENTER, x_ofs = 0, y_ofs = -154 },
 })
 
 status_label = lvgl.Label(main_page, {
-  text = "(状态)", text_color = C_TXT3, text_font = lvgl.Font(F_BODY, 14),
+  text = "(状态)", text_color = C_TXT3, text_font = font(F_BODY, 14),
   width = 316, height = 22,
   align = { type = lvgl.ALIGN.CENTER, x_ofs = 0, y_ofs = -9 },
 })
@@ -2586,7 +3422,7 @@ local COL_W, COL_X = 152, 80
 local ROW1, ROW2 = -106, -50
 
 make_button(main_page, "1  自启动管理", ROW1, -COL_X, COL_W, 48, C_BLUE,  show_autostart, 20)
-make_button(main_page, "2  重建自启动", ROW1,  COL_X, COL_W, 48, C_RED,   do_rebuild,     20, "重建自启动")
+make_button(main_page, "2  应用自启动", ROW1,  COL_X, COL_W, 48, C_RED,   do_rebuild,     20, "应用自启动")
 make_button(main_page, "3  模块管理",   ROW2, -COL_X, COL_W, 48, C_SLATE, show_modules,   20)
 make_button(main_page, "4  日志",       ROW2,  COL_X, COL_W, 48, C_OLIVE, show_log,       20)
 
@@ -2603,12 +3439,12 @@ back_as:clear_flag(lvgl.FLAG.SCROLLABLE)
 back_as:add_flag(lvgl.FLAG.CLICKABLE)
 lvgl.Label(back_as, {
   text = "< 返回", text_color = C_TXT, align = lvgl.ALIGN.CENTER,
-  text_font = lvgl.Font(F_BODY, 20),
+  text_font = font(F_BODY, 20),
 })
 back_as:onClicked(show_main)
 
 lvgl.Label(autostart_page, {
-  text = "自启动", text_color = C_TXT, text_font = lvgl.Font(F_BOLD, 24),
+  text = "自启动", text_color = C_TXT, text_font = font(F_BOLD, 24),
   width = 80, align = { type = lvgl.ALIGN.TOP_LEFT, x_ofs = 244, y_ofs = 20 },
 })
 
@@ -2624,10 +3460,11 @@ as_log_label, mini_lines_as = make_mini_box(autostart_page, 83, MINI_BOX_H_AS)
 
 -- ===================== 启动 =====================
 show_main()
-log_restore()
+log_restore()          -- ★ 里面已经 mkdir -p 过 DATA_DIR，这里不再重复一次（2026-10-24）
+-- ★ 启动段的十几行日志先攒着，末尾一次落盘（见 log_persist 上面那段）。
+LOGBUF.lines = {}
 log_append("--- 10pro.autorun 管理器启动 ---")
 
-exec("mkdir -p " .. DATA_DIR)
 local summary = refresh_all(true)
 log_append("扫描: " .. summary)
 
@@ -2636,10 +3473,12 @@ log_append("扫描: " .. summary)
 if CFG_OK then
   log_append("配置: " .. CFG_PATH, 0x8FF0A4)
 else
-  log_append("配置建不出来: " .. CFG_PATH .. " -> 重建会被拒绝", 0xFF9A9A)
+  log_append("配置建不出来: " .. CFG_PATH .. " -> 应用会被拒绝", 0xFF9A9A)
 end
 
-local _st, gen, others = rc_state()
+-- ★ 一次读盘，下面 rc_state / rc_pending 共用（以前是各读一遍 /data/rc）。
+local rc_cur = read_all(RC_PATH)
+local _st, gen, others = rc_state(rc_cur)
 log_append(string.format("/data/rc: 生成 %d 行, 别人的 %d 行", gen, others),
   others > 0 and 0xFFD27A or 0x8FF0A4)
 if others > 0 then
@@ -2655,13 +3494,16 @@ if not gate_on() then
     .. " —— 自启动页 [3 开启]", 0xFFD27A)
 end
 -- ★ 落后于配置时必须当场说清楚，否则"上次改了开关、这次开机没生效"没人知道为什么。
-if CFG_OK and rc_pending() then
-  log_append("配置与 /data/rc 不一致 -> 按 [2 重建自启动] 落盘", 0xFFD27A)
+if CFG_OK and rc_pending(rc_cur) then
+  log_append("配置与 /data/rc 不一致 -> 按 [2 应用自启动] 落盘", 0xFFD27A)
 end
--- ★ 自启动页那块**状态摘要**在这里先算一次（里面有一次 flash 只读探测：是否安装）。
---   之后每条日志都会按它重画面板（log_mini -> as_box_text），所以必须排在 Ready 之前。
-refresh_as_state()
+-- ★ 自启动页那块**状态摘要**不在这里算了（2026-10-24 性能）：它是整个界面上唯一要
+--   **读 flash** 的东西 —— 一次 = getprop + 3×(rm+dd) + 4 次 32KB 读。以前冷启动
+--   为此白等，而那块面板**此刻根本看不见**（自启动页还没打开）。
+--   现在改成"进页面时再算"：show_autostart / 装 / 卸 / 开关 本来就会调 refresh_as_state()。
+--   代价：第一次进自启动页之前 AS_STATE 是空的 ⇒ 那个框只显示日志尾巴（没人看得见）。
 log_append("Ready")
+LOGBUF.flush()         -- 启动段的日志到这里一次写完
 refresh_status()
 render_rows()
 scroll_log_bottom()

@@ -1,4 +1,4 @@
-//! canopus-abi — Rust port of the public Canopus module ABI v1.
+//! canopus-abi — Rust port of the public Canopus module ABI v2.
 //!
 //! The layout here MUST match `sdk/c/canopus_abi.h` field-for-field:
 //! fixed-width fields, natural alignment, no `#[repr(packed)]`. Every struct
@@ -18,8 +18,8 @@ use core::ffi::{c_char, c_void};
 // Version
 // ---------------------------------------------------------------------------
 
-pub const ABI_MAJOR: u16 = 1;
-pub const ABI_MINOR: u16 = 2;
+pub const ABI_MAJOR: u16 = 2;
+pub const ABI_MINOR: u16 = 0;
 
 // ---------------------------------------------------------------------------
 // Module descriptor flags
@@ -70,6 +70,663 @@ pub const CAP_MAGIC: u32 = 0x4341_5031; // "CAP1"
 /// Opaque firmware-side context passed to every module callback. Never
 /// dereferenced by the module; only ever used behind a pointer.
 pub enum ContextV1 {}
+
+// ---------------------------------------------------------------------------
+// Service Objects & Context v2
+// ---------------------------------------------------------------------------
+
+pub const FS_READ: u32 = 0x0001;
+pub const FS_WRITE: u32 = 0x0002;
+pub const FS_APPEND: u32 = 0x0004;
+pub const FS_CREATE: u32 = 0x0008;
+pub const FS_TRUNC: u32 = 0x0010;
+pub const FS_RDWR: u32 = FS_READ | FS_WRITE;
+
+pub const FS_SEEK_SET: i32 = 0;
+pub const FS_SEEK_CUR: i32 = 1;
+pub const FS_SEEK_END: i32 = 2;
+
+pub const MEM_BUDGET: u32 = 131072; // 128 KiB
+pub const MEM_MAX_BLOCKS: u32 = 64;
+
+/// Maximum timer interval compatible with wrap-safe 32-bit clock comparisons.
+/// Mirrors `CANOPUS_TIMER_MAX_INTERVAL_MS` in `canopus_services.h`.
+pub const TIMER_MAX_INTERVAL_MS: u32 = 0x7fff_ffff;
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub struct CanopusFsStat {
+    pub size: u32,
+    pub is_dir: u8,
+    pub _pad: [u8; 3],
+    pub mtime: u32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct CanopusFsDirent {
+    pub name: [u8; 64],
+    pub is_dir: u8,
+    pub _pad: [u8; 3],
+}
+
+#[repr(u32)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum HookType {
+    Auto = 0,
+    Fpb = 1,
+    Inline = 2,
+    Pointer = 3,
+}
+
+pub const HAPTIC_CLICK: u32 = 1;
+pub const HAPTIC_DOUBLE_CLICK: u32 = 2;
+pub const HAPTIC_HEAVY: u32 = 3;
+pub const HAPTIC_ALERT: u32 = 4;
+pub const HAPTIC_TICK: u32 = 5;
+
+pub const WAKELOCK_SCREEN: u32 = 1;
+
+pub const CONNECT_TEXT: u32 = 1;
+pub const CONNECT_BINARY: u32 = 2;
+pub const CONNECT_DATA_MAX: u32 = 480;
+/// `connect.send` returns this (positive, nothing queued) when no remote plugin listens.
+pub const CONNECT_NOT_LISTENING: i32 = 1;
+
+pub const SCREEN_OFF: u32 = 0;
+pub const SCREEN_AOD: u32 = 1;
+pub const SCREEN_ON: u32 = 2;
+
+/// "Unknown" sentinels of the plain-integer getters (see `canopus_services.h`).
+pub const DISPLAY_BRIGHTNESS_UNKNOWN: u32 = 0xFFFF_FFFF;
+pub const SYSTEM_BATTERY_UNKNOWN: u32 = 0xFFFF_FFFF;
+pub const BT_ADAPTER_UNKNOWN: u32 = 0xFFFF_FFFF;
+pub const BT_ADAPTER_OFF: u32 = 0;
+pub const BT_ADAPTER_ON: u32 = 4;
+
+pub type CbTimer =
+    unsafe extern "C" fn(ctx: *const ContextV1, timer_id: i32, user_data: *mut c_void);
+pub type CbBus = unsafe extern "C" fn(
+    ctx: *const ContextV1,
+    topic: *const c_char,
+    payload: *const c_void,
+    len: u32,
+    user_data: *mut c_void,
+);
+pub type CbL2Rx = unsafe extern "C" fn(
+    ctx: *const ContextV1,
+    channel: u8,
+    payload: *const c_void,
+    len: u16,
+    user_data: *mut c_void,
+);
+pub type CbConnect = unsafe extern "C" fn(
+    ctx: *const ContextV1,
+    kind: u32,
+    data: *const c_void,
+    len: u32,
+    user_data: *mut c_void,
+);
+
+#[repr(C)]
+pub struct CanopusFsObj {
+    pub open: unsafe extern "C" fn(ctx: *const ContextV1, path: *const c_char, flags: u32) -> i32,
+    pub read:
+        unsafe extern "C" fn(ctx: *const ContextV1, fd: i32, buf: *mut c_void, size: u32) -> i32,
+    pub write:
+        unsafe extern "C" fn(ctx: *const ContextV1, fd: i32, buf: *const c_void, size: u32) -> i32,
+    pub seek: unsafe extern "C" fn(ctx: *const ContextV1, fd: i32, offset: i64, whence: i32) -> i64,
+    pub tell: unsafe extern "C" fn(ctx: *const ContextV1, fd: i32) -> i64,
+    pub size: unsafe extern "C" fn(ctx: *const ContextV1, fd: i32) -> i64,
+    pub sync: unsafe extern "C" fn(ctx: *const ContextV1, fd: i32) -> i32,
+    pub close: unsafe extern "C" fn(ctx: *const ContextV1, fd: i32) -> i32,
+    pub remove: unsafe extern "C" fn(ctx: *const ContextV1, path: *const c_char) -> i32,
+    pub rename: unsafe extern "C" fn(
+        ctx: *const ContextV1,
+        old_path: *const c_char,
+        new_path: *const c_char,
+    ) -> i32,
+    pub stat: unsafe extern "C" fn(
+        ctx: *const ContextV1,
+        path: *const c_char,
+        out_stat: *mut CanopusFsStat,
+    ) -> i32,
+    pub exists: unsafe extern "C" fn(ctx: *const ContextV1, path: *const c_char) -> i32,
+    pub mkdir: unsafe extern "C" fn(ctx: *const ContextV1, path: *const c_char) -> i32,
+    pub opendir: unsafe extern "C" fn(ctx: *const ContextV1, path: *const c_char) -> *mut c_void,
+    pub readdir: unsafe extern "C" fn(
+        ctx: *const ContextV1,
+        dir: *mut c_void,
+        out_entry: *mut CanopusFsDirent,
+    ) -> i32,
+    pub closedir: unsafe extern "C" fn(ctx: *const ContextV1, dir: *mut c_void) -> i32,
+    pub read_all: unsafe extern "C" fn(
+        ctx: *const ContextV1,
+        path: *const c_char,
+        buffer: *mut c_void,
+        max_size: u32,
+    ) -> i32,
+    pub write_all: unsafe extern "C" fn(
+        ctx: *const ContextV1,
+        path: *const c_char,
+        buffer: *const c_void,
+        size: u32,
+    ) -> i32,
+    pub get_data_path:
+        unsafe extern "C" fn(ctx: *const ContextV1, buffer: *mut c_char, max_size: u32) -> i32,
+    /// FS group version 2. Check `services_has(ctx, SVC_FS, 2)` before access.
+    pub rmdir: unsafe extern "C" fn(ctx: *const ContextV1, path: *const c_char) -> i32,
+}
+
+#[repr(C)]
+pub struct CanopusKvObj {
+    pub get_int:
+        unsafe extern "C" fn(ctx: *const ContextV1, key: *const c_char, default_val: i32) -> i32,
+    pub set_int: unsafe extern "C" fn(ctx: *const ContextV1, key: *const c_char, val: i32) -> i32,
+    pub get_string: unsafe extern "C" fn(
+        ctx: *const ContextV1,
+        key: *const c_char,
+        buf: *mut c_char,
+        buf_size: u32,
+    ) -> i32,
+    pub set_string:
+        unsafe extern "C" fn(ctx: *const ContextV1, key: *const c_char, val: *const c_char) -> i32,
+    pub get_bool:
+        unsafe extern "C" fn(ctx: *const ContextV1, key: *const c_char, default_val: i32) -> i32,
+    pub set_bool: unsafe extern "C" fn(ctx: *const ContextV1, key: *const c_char, val: i32) -> i32,
+    pub remove: unsafe extern "C" fn(ctx: *const ContextV1, key: *const c_char) -> i32,
+    pub clear: unsafe extern "C" fn(ctx: *const ContextV1) -> i32,
+}
+
+#[repr(C)]
+pub struct CanopusMemObj {
+    pub alloc: unsafe extern "C" fn(ctx: *const ContextV1, size: u32) -> *mut c_void,
+    pub calloc: unsafe extern "C" fn(ctx: *const ContextV1, num: u32, size: u32) -> *mut c_void,
+    pub realloc:
+        unsafe extern "C" fn(ctx: *const ContextV1, ptr: *mut c_void, new_size: u32) -> *mut c_void,
+    pub free: unsafe extern "C" fn(ctx: *const ContextV1, ptr: *mut c_void),
+    pub available: unsafe extern "C" fn(ctx: *const ContextV1) -> u32,
+    pub used: unsafe extern "C" fn(ctx: *const ContextV1) -> u32,
+}
+
+#[repr(C)]
+pub struct CanopusTimeObj {
+    pub monotonic_ms: unsafe extern "C" fn(ctx: *const ContextV1) -> u32,
+    pub realtime_ms: unsafe extern "C" fn(ctx: *const ContextV1) -> u64,
+    pub sleep_ms: unsafe extern "C" fn(ctx: *const ContextV1, ms: u32),
+    pub timer_create: unsafe extern "C" fn(
+        ctx: *const ContextV1,
+        interval_ms: u32,
+        periodic: i32,
+        cb: CbTimer,
+        user_data: *mut c_void,
+    ) -> i32,
+    pub timer_start: unsafe extern "C" fn(ctx: *const ContextV1, timer_id: i32) -> i32,
+    pub timer_stop: unsafe extern "C" fn(ctx: *const ContextV1, timer_id: i32) -> i32,
+    pub timer_destroy: unsafe extern "C" fn(ctx: *const ContextV1, timer_id: i32) -> i32,
+    /// Time group version 2: keep firing while the screen is off.
+    pub timer_set_background:
+        unsafe extern "C" fn(ctx: *const ContextV1, timer_id: i32, background: i32) -> i32,
+}
+
+#[repr(C)]
+pub struct CanopusHookObj {
+    pub install: unsafe extern "C" fn(
+        ctx: *const ContextV1,
+        target_fn: usize,
+        hook_fn: usize,
+        orig_fn: *mut usize,
+        hook_type: u32,
+    ) -> i32,
+    pub uninstall: unsafe extern "C" fn(ctx: *const ContextV1, hook_id: i32) -> i32,
+    pub is_hooked: unsafe extern "C" fn(ctx: *const ContextV1, target_fn: usize) -> i32,
+    pub register_slot_map:
+        unsafe extern "C" fn(ctx: *const ContextV1, flash_fn: usize, ram_slot: usize) -> i32,
+}
+
+#[repr(C)]
+pub struct CanopusHapticsObj {
+    pub vibrate: unsafe extern "C" fn(ctx: *const ContextV1, duration_ms: u32) -> i32,
+    pub vibrate_pattern:
+        unsafe extern "C" fn(ctx: *const ContextV1, pattern_ms: *const u16, count: u32) -> i32,
+    pub vibrate_preset: unsafe extern "C" fn(ctx: *const ContextV1, preset: u32) -> i32,
+    pub cancel: unsafe extern "C" fn(ctx: *const ContextV1) -> i32,
+}
+
+#[repr(C)]
+pub struct CanopusDisplayObj {
+    pub get_brightness: unsafe extern "C" fn(ctx: *const ContextV1) -> u32,
+    pub set_brightness: unsafe extern "C" fn(ctx: *const ContextV1, percent: u32) -> i32,
+    pub is_screen_on: unsafe extern "C" fn(ctx: *const ContextV1) -> i32,
+    pub wake_screen: unsafe extern "C" fn(ctx: *const ContextV1) -> i32,
+    pub acquire_wake_lock: unsafe extern "C" fn(ctx: *const ContextV1, lock_flags: u32) -> i32,
+    pub release_wake_lock: unsafe extern "C" fn(ctx: *const ContextV1, lock_id: i32) -> i32,
+    pub get_resolution:
+        unsafe extern "C" fn(ctx: *const ContextV1, width: *mut u32, height: *mut u32),
+}
+
+#[repr(C)]
+pub struct CanopusConnectObj {
+    pub send: unsafe extern "C" fn(
+        ctx: *const ContextV1,
+        kind: u32,
+        data: *const c_void,
+        len: u32,
+    ) -> i32,
+    pub listen: unsafe extern "C" fn(
+        ctx: *const ContextV1,
+        cb: Option<CbConnect>,
+        user_data: *mut c_void,
+    ) -> i32,
+    pub remote_listening: unsafe extern "C" fn(ctx: *const ContextV1) -> i32,
+}
+
+pub const BUS_TOPIC_MODULE: &[u8] = b"canopus/module/state\0";
+pub const MODULE_ID_MAX: usize = 32;
+pub const MODULE_INTENT_DISABLED: u32 = 0;
+pub const MODULE_INTENT_ENABLED: u32 = 1;
+pub const MODULE_INTENT_REMOVE: u32 = 2;
+
+/// Borrowed bus lifecycle payload, also returned by `bus.query_module`.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub struct ModuleStateV1 {
+    pub module_id: [u8; MODULE_ID_MAX],
+    pub state: u32,
+    pub intent: u32,
+    pub version: u32,
+    pub lifecycle_class: u32,
+    pub flags: u32,
+    pub activation_error: i32,
+    pub active_generation: u32,
+}
+
+#[repr(C)]
+pub struct CanopusBusObj {
+    pub publish: unsafe extern "C" fn(
+        ctx: *const ContextV1,
+        topic: *const c_char,
+        payload: *const c_void,
+        len: u32,
+    ) -> i32,
+    pub subscribe: unsafe extern "C" fn(
+        ctx: *const ContextV1,
+        topic: *const c_char,
+        cb: CbBus,
+        user_data: *mut c_void,
+    ) -> i32,
+    pub unsubscribe: unsafe extern "C" fn(ctx: *const ContextV1, sub_id: i32) -> i32,
+    pub query_module: unsafe extern "C" fn(
+        ctx: *const ContextV1,
+        module_id: *const c_char,
+        out: *mut ModuleStateV1,
+    ) -> i32,
+}
+
+#[repr(C)]
+pub struct CanopusLogObj {
+    pub write: unsafe extern "C" fn(ctx: *const ContextV1, level: u32, message: *const c_char),
+    pub info: unsafe extern "C" fn(ctx: *const ContextV1, message: *const c_char),
+    pub warn: unsafe extern "C" fn(ctx: *const ContextV1, message: *const c_char),
+    pub error: unsafe extern "C" fn(ctx: *const ContextV1, message: *const c_char),
+    pub debug: unsafe extern "C" fn(ctx: *const ContextV1, message: *const c_char),
+}
+
+#[repr(C)]
+pub struct CanopusNotifyObj {
+    pub post: unsafe extern "C" fn(
+        ctx: *const ContextV1,
+        title: *const c_char,
+        body: *const c_char,
+    ) -> i32,
+    pub post_with_icon: unsafe extern "C" fn(
+        ctx: *const ContextV1,
+        title: *const c_char,
+        body: *const c_char,
+        icon_path: *const c_char,
+        vibrate: i32,
+    ) -> i32,
+}
+
+#[repr(C)]
+pub struct CanopusSystemObj {
+    pub target_id: unsafe extern "C" fn(ctx: *const ContextV1) -> *const c_char,
+    pub module_id: unsafe extern "C" fn(ctx: *const ContextV1) -> *const c_char,
+    pub device_model: unsafe extern "C" fn(ctx: *const ContextV1) -> *const c_char,
+    pub firmware_version: unsafe extern "C" fn(ctx: *const ContextV1) -> *const c_char,
+    pub framework_revision: unsafe extern "C" fn(ctx: *const ContextV1) -> u32,
+    pub is_safe_mode: unsafe extern "C" fn(ctx: *const ContextV1) -> i32,
+    pub uptime_ms: unsafe extern "C" fn(ctx: *const ContextV1) -> u64,
+    pub battery_level: unsafe extern "C" fn(ctx: *const ContextV1) -> u32,
+    pub is_charging: unsafe extern "C" fn(ctx: *const ContextV1) -> i32,
+    pub reboot: unsafe extern "C" fn(ctx: *const ContextV1) -> i32,
+    pub get_property: unsafe extern "C" fn(
+        ctx: *const ContextV1,
+        key: *const c_char,
+        buf: *mut c_char,
+        max_len: u32,
+    ) -> i32,
+}
+
+#[repr(C)]
+pub struct CanopusBluetoothObj {
+    pub l2_send: unsafe extern "C" fn(
+        ctx: *const ContextV1,
+        channel: u8,
+        payload: *const c_void,
+        len: u16,
+    ) -> i32,
+    pub l2_register_rx: unsafe extern "C" fn(
+        ctx: *const ContextV1,
+        channel: u8,
+        cb: CbL2Rx,
+        user_data: *mut c_void,
+    ) -> i32,
+    pub is_connected: unsafe extern "C" fn(ctx: *const ContextV1) -> i32,
+    pub adapter_state: unsafe extern "C" fn(ctx: *const ContextV1) -> u32,
+}
+
+#[repr(C)]
+pub struct CanopusUiObj {
+    pub capabilities: unsafe extern "C" fn(ctx: *const c_void) -> u32,
+    pub tree_begin: unsafe extern "C" fn(ctx: *mut c_void, out_tree: *mut *mut c_void) -> i32,
+    pub tree_commit: unsafe extern "C" fn(tree: *mut c_void) -> i32,
+    pub tree_abort: unsafe extern "C" fn(tree: *mut c_void),
+    pub end: unsafe extern "C" fn(tree: *mut c_void) -> i32,
+    pub navigation_page:
+        unsafe extern "C" fn(tree: *mut c_void, key: u32, props: *const c_void) -> i32,
+    pub section: unsafe extern "C" fn(tree: *mut c_void, key: u32, props: *const c_void) -> i32,
+    pub text: unsafe extern "C" fn(tree: *mut c_void, key: u32, props: *const c_void) -> i32,
+    pub status_row: unsafe extern "C" fn(tree: *mut c_void, key: u32, props: *const c_void) -> i32,
+    pub button: unsafe extern "C" fn(tree: *mut c_void, key: u32, props: *const c_void) -> i32,
+    pub action_row: unsafe extern "C" fn(tree: *mut c_void, key: u32, props: *const c_void) -> i32,
+    pub switch_row: unsafe extern "C" fn(tree: *mut c_void, key: u32, props: *const c_void) -> i32,
+    pub navigation_header:
+        unsafe extern "C" fn(tree: *mut c_void, key: u32, props: *const c_void) -> i32,
+    pub component:
+        unsafe extern "C" fn(tree: *mut c_void, key: u32, type_: u16, props: *const c_void) -> i32,
+    pub node_set_style:
+        unsafe extern "C" fn(tree: *mut c_void, key: u32, style: *const c_void) -> i32,
+    pub node_set_layout:
+        unsafe extern "C" fn(tree: *mut c_void, key: u32, layout: *const c_void) -> i32,
+    pub set_entry: unsafe extern "C" fn(ctx: *const ContextV1, entry: *const UiEntryV1) -> i32,
+    pub close_page: unsafe extern "C" fn(ctx: *const ContextV1) -> i32,
+    /* Multi-page UI entries: push/finish through the target's page stack. */
+    pub route: unsafe extern "C" fn(ctx: *const ContextV1, route: u32) -> i32,
+    pub node_set_visual:
+        unsafe extern "C" fn(tree: *mut c_void, key: u32, visual: *const UiVisualV1) -> i32,
+    pub control: unsafe extern "C" fn(
+        ui: *mut c_void, generation: u32, key: u32, op: u32, a: i32, b: i32, out: *mut c_void,
+    ) -> i32,
+    pub post: unsafe extern "C" fn(
+        ctx: *const ContextV1, callback: CbUiTask, user_data: *mut c_void,
+    ) -> i32,
+}
+
+pub type CbUiTask = unsafe extern "C" fn(ctx: *const ContextV1, user_data: *mut c_void);
+pub type UiEventHandlerV1 = unsafe extern "C" fn(cookie: *mut c_void, event: *const UiEventV1) -> i32;
+
+pub const UI_EVENT_ACTIVATE: u32 = 1;
+pub const UI_EVENT_VALUE_CHANGED: u32 = 2;
+pub const UI_EVENT_PRESS: u32 = 3;
+pub const UI_EVENT_LONG_PRESS: u32 = 4;
+pub const UI_EVENT_MOVE: u32 = 5;
+pub const UI_EVENT_RELEASE: u32 = 6;
+pub const UI_EVENT_CANCEL: u32 = 7;
+pub const UI_EVENT_SCROLL: u32 = 8;
+pub const UI_CONTROL_SCROLL_QUERY: u32 = 1;
+pub const UI_CONTROL_SCROLL_TO: u32 = 2;
+pub const UI_CONTROL_TRANSLATE: u32 = 3;
+pub const UI_CONTROL_CAPTURE: u32 = 4;
+pub const UI_CONTROL_RELEASE_CAPTURE: u32 = 5;
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub struct UiEventV1 {
+    pub struct_size: u32,
+    pub generation: u32,
+    pub key: u32,
+    pub event_id: u32,
+    pub type_: u32,
+    pub time_ms: u32,
+    pub x: i32,
+    pub y: i32,
+    pub delta_x: i32,
+    pub delta_y: i32,
+    pub scroll_y: i32,
+    pub viewport_height: i32,
+    pub content_height: i32,
+}
+
+impl UiEventV1 {
+    /// Builds an activation record with no pointer or scrolling metrics.
+    pub fn activate(generation: u32, key: u32, event_id: u32) -> Self {
+        Self {
+            struct_size: core::mem::size_of::<Self>() as u32,
+            generation,
+            key,
+            event_id,
+            type_: UI_EVENT_ACTIVATE,
+            ..Self::default()
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub struct UiVisualV1 {
+    pub flags: u32,
+    pub foreground_rgb: u32,
+    pub background_rgb: u32,
+    pub border_rgb: u32,
+    pub x: i16,
+    pub y: i16,
+    pub translate_x: i16,
+    pub translate_y: i16,
+    pub font_px: u16,
+    pub image_fit: u16,
+    pub content_height: u32,
+    pub scroll_y: i32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub struct UiScrollMetricsV1 {
+    pub y: i32,
+    pub viewport_height: i32,
+    pub content_height: i32,
+}
+
+/// The page a module offers through the Manager (`struct canopus_ui_entry_v1`).
+/// `ui` is the `canopus_ui_context_v1` the Supervisor hands to the callbacks.
+#[repr(C)]
+pub struct UiEntryV1 {
+    pub struct_size: u32,
+    pub label: *const c_char,
+    pub on_open: Option<
+        unsafe extern "C" fn(ctx: *const ContextV1, ui: *mut c_void, user_data: *mut c_void) -> i32,
+    >,
+    pub on_event: Option<
+        unsafe extern "C" fn(
+            ctx: *const ContextV1,
+            ui: *mut c_void,
+            event: *const UiEventV1,
+            user_data: *mut c_void,
+        ) -> i32,
+    >,
+    pub on_back: Option<
+        unsafe extern "C" fn(ctx: *const ContextV1, ui: *mut c_void, user_data: *mut c_void) -> i32,
+    >,
+    pub on_close: Option<unsafe extern "C" fn(ctx: *const ContextV1, user_data: *mut c_void)>,
+    pub user_data: *mut c_void,
+    /* Firmware pages this entry's routes travel through. 0 keeps the
+     * single-page contract; above 0 enables ctx->ui->route. */
+    pub page_count: u32,
+}
+
+pub const UI_ENTRY_LABEL_MAX: u32 = 24;
+pub const UI_ENTRY_PAGES_MAX: u32 = 8;
+
+// The Supervisor only reads an entry; modules declare theirs as a `static`.
+unsafe impl Sync for UiEntryV1 {}
+
+// `CANOPUS_UI_*` result codes (`sdk/c/canopus_ui.h`).
+pub const UI_OK: i32 = 0;
+pub const UI_ERR_ARGUMENT: i32 = -1;
+pub const UI_ERR_STATE: i32 = -2;
+pub const UI_ERR_CAPACITY: i32 = -3;
+pub const UI_ERR_DUP_KEY: i32 = -4;
+pub const UI_ERR_BACKEND: i32 = -5;
+pub const UI_ERR_STALE: i32 = -6;
+pub const UI_ERR_DISABLED: i32 = -7;
+pub const UI_ERR_UNSUPPORTED: i32 = -8;
+
+// Props for the `CanopusUiObj` row builders (`struct canopus_ui_*_props_v1`).
+// Text is UTF-8 with an explicit byte length.
+
+#[repr(C)]
+pub struct UiNavigationPagePropsV1 {
+    pub struct_size: u32,
+    pub title: *const c_char,
+    pub title_len: u32,
+}
+
+#[repr(C)]
+pub struct UiSectionPropsV1 {
+    pub struct_size: u32,
+    pub title: *const c_char,
+    pub title_len: u32,
+}
+
+#[repr(C)]
+pub struct UiStatusRowPropsV1 {
+    pub struct_size: u32,
+    pub label: *const c_char,
+    pub label_len: u32,
+    pub value: *const c_char,
+    pub value_len: u32,
+}
+
+#[repr(C)]
+pub struct UiActionRowPropsV1 {
+    pub struct_size: u32,
+    pub label: *const c_char,
+    pub label_len: u32,
+    pub detail: *const c_char,
+    pub detail_len: u32,
+    pub event_id: u32,
+    pub enabled: u32,
+}
+
+#[repr(C)]
+pub struct UiSwitchRowPropsV1 {
+    pub struct_size: u32,
+    pub label: *const c_char,
+    pub label_len: u32,
+    pub detail: *const c_char,
+    pub detail_len: u32,
+    pub event_id: u32,
+    pub checked: u32,
+    pub enabled: u32,
+}
+
+/// Supervisor-owned application definition (`struct canopus_app_entry_v1`).
+///
+/// Null `pages` with zero `page_count` opens the module's registered UI entry.
+/// Native definitions provide writable exact-target descriptors whose pointer
+/// array is copied before return; descriptors remain valid until reboot.
+#[repr(C)]
+pub struct AppEntryV1 {
+    pub struct_size: u32,
+    pub label: *const c_char,
+    pub icon: *const c_char,
+    pub pages: *const *mut c_void,
+    pub page_count: u32,
+}
+
+/// `struct canopus_launcher_obj`, LAUNCHER service version 1.
+#[repr(C)]
+pub struct CanopusLauncherObj {
+    /// Returns the positive assigned app ID or a negative service error.
+    pub register_app:
+        unsafe extern "C" fn(ctx: *const ContextV1, entry: *const AppEntryV1) -> i32,
+}
+
+pub const LAUNCHER_ENTRIES: u32 = 8;
+pub const LAUNCHER_LABEL_MAX: u32 = 24;
+pub const LAUNCHER_ICON_MAX: u32 = 96;
+pub const NATIVE_APP_PAGES_MAX: u32 = 16;
+
+#[repr(C)]
+pub struct CanopusContext {
+    pub struct_size: u32,
+    pub abi: u32,
+    pub services: *const c_void,
+    pub slot: u32,
+    pub target_id: *const c_char,
+    pub module_id: *const c_char,
+    pub fs: *const CanopusFsObj,
+    pub kv: *const CanopusKvObj,
+    pub mem: *const CanopusMemObj,
+    pub time: *const CanopusTimeObj,
+    pub hook: *const CanopusHookObj,
+    pub log: *const CanopusLogObj,
+    pub notify: *const CanopusNotifyObj,
+    pub system: *const CanopusSystemObj,
+    pub bt: *const CanopusBluetoothObj,
+    pub haptics: *const CanopusHapticsObj,
+    pub display: *const CanopusDisplayObj,
+    pub bus: *const CanopusBusObj,
+    pub ui: *const CanopusUiObj,
+    pub connect: *const CanopusConnectObj,
+    pub launcher: *const CanopusLauncherObj,
+}
+
+// Service groups (`CANOPUS_SVC_*`): indexes into `ServicesV1Head::group_version`.
+pub const SVC_MODULE: u32 = 0;
+pub const SVC_LOG: u32 = 1;
+pub const SVC_FS: u32 = 2;
+pub const SVC_TIME: u32 = 3;
+pub const SVC_MEM: u32 = 4;
+pub const SVC_NOTIFY: u32 = 5;
+pub const SVC_HOOK: u32 = 6;
+pub const SVC_SYSTEM: u32 = 7;
+pub const SVC_BLUETOOTH: u32 = 8;
+pub const SVC_KV: u32 = 9;
+pub const SVC_HAPTICS: u32 = 10;
+pub const SVC_DISPLAY: u32 = 11;
+pub const SVC_BUS: u32 = 12;
+pub const SVC_CONNECT: u32 = 13;
+pub const SVC_LAUNCHER: u32 = 14;
+pub const SVC_GROUP_COUNT: u32 = 15;
+
+/// The head of `struct canopus_services_v1` (`CanopusContext::services`): the
+/// per-group versions a module checks before using a service object.
+#[repr(C)]
+pub struct ServicesV1Head {
+    pub struct_size: u32,
+    /// 0 = the group is absent.
+    pub group_version: [u8; SVC_GROUP_COUNT as usize],
+}
+
+/// `canopus_services_has`: whether `group` is available at least at `min_version`.
+///
+/// # Safety
+/// `ctx` is null or the context the Supervisor passed to a callback.
+pub unsafe fn services_has(ctx: *const ContextV1, group: u32, min_version: u8) -> bool {
+    let Some(ctx) = (unsafe { (ctx as *const CanopusContext).as_ref() }) else {
+        return false;
+    };
+    if (ctx.struct_size as usize) < core::mem::size_of::<CanopusContext>()
+        || ctx.services.is_null()
+        || group >= SVC_GROUP_COUNT
+    {
+        return false;
+    }
+    let version =
+        unsafe { (*(ctx.services as *const ServicesV1Head)).group_version[group as usize] };
+    version != 0 && version >= min_version
+}
 
 // ---------------------------------------------------------------------------
 // Snapshot (sequence protocol, architecture §16)
@@ -129,9 +786,9 @@ pub struct ModuleDescriptorV1 {
     pub deactivate: Option<CbDeactivate>,
     pub stop: Option<CbStop>,
     pub query: Option<CbQuery>,
-    /// ABI 1.1 append-only callback. Called only from a UI-process bootstrap.
+    /// Called only from a UI-process bootstrap.
     pub publish_native_app: Option<CbPublishNativeApp>,
-    /// ABI 1.2 append-only callback. Stage 1 registers app/pages; stage 2 adds
+    /// Stage 1 registers app/pages; stage 2 adds
     /// the Launcher entry in a later UI event turn.
     pub publish_native_app_stage: Option<CbPublishNativeAppStage>,
 }
@@ -275,8 +932,29 @@ mod layout {
     }
 
     #[test]
+    fn hook_object_append_only_layout() {
+        let pointer = size_of::<usize>();
+        assert_eq!(offset_of!(CanopusHookObj, install), 0);
+        assert_eq!(offset_of!(CanopusHookObj, uninstall), pointer);
+        assert_eq!(offset_of!(CanopusHookObj, is_hooked), 2 * pointer);
+        assert_eq!(offset_of!(CanopusHookObj, register_slot_map), 3 * pointer);
+        assert_eq!(size_of::<CanopusHookObj>(), 4 * pointer);
+    }
+
+    #[test]
+    fn launcher_registration_layout() {
+        let pointer = size_of::<usize>();
+        assert_eq!(offset_of!(CanopusLauncherObj, register_app), 0);
+        assert_eq!(size_of::<CanopusLauncherObj>(), pointer);
+        assert_eq!(offset_of!(AppEntryV1, pages), 3 * pointer);
+        assert_eq!(offset_of!(AppEntryV1, page_count), 4 * pointer);
+        assert_eq!(size_of::<AppEntryV1>(), 5 * pointer);
+    }
+
+    #[test]
     fn abi_version_constants() {
-        assert_eq!(ABI_MAJOR, 1);
-        assert_eq!(ABI_MINOR, 2);
+        assert_eq!(ABI_MAJOR, 2);
+        assert_eq!(ABI_MINOR, 0);
+        assert_eq!(TIMER_MAX_INTERVAL_MS, i32::MAX as u32);
     }
 }

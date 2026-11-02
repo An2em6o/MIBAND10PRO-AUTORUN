@@ -39,12 +39,14 @@ local MANAGER_ICON_PATH = "/data/canopus/manager_icon.bin"
 local DEVICE_PATH = "/dev/canopus"
 local MODULE_MIN_SIZE = 512
 local MODULE_MAX_SIZE = 262144
-local STATUS_SIZE = 384
-local EXPECTED_MAGIC = 0x43505331 -- "CPS1"
-local EXPECTED_CMD_MAGIC = 0x43504331 -- "CPC1"
-local CMD_INSTALL = 0x43510002
-local CMD_RESTORE_AFTER_BOOT = 0x4351000A
+local CPC2_MAGIC = 0x43504332
+local CPC2_HEADER = 36
+local CPC2_ABI_MAJOR = 2
+local CMD_QUERY_DEVICE = 9
+local CMD_INSTALL = 13           -- NATIVE_STAGE: payload-free INSTALL stages 0..2
+local CMD_RESTORE_AFTER_BOOT = 14
 local RESULT_COMPLETED = 5
+local request_id = 0
 
 local target_id
 local profile
@@ -115,6 +117,7 @@ local function select_target()
     stage1_resource = SCRIPT_PATH .. "canopus_stage1-" .. target_id .. ".bin"
     stage2_resource = SCRIPT_PATH .. "canopus_stage2-" .. target_id .. ".bin"
     supervisor_resource = SCRIPT_PATH .. "canopus_supervisor-" .. target_id .. ".bin"
+    boot_resource = SCRIPT_PATH .. "canopus_boot-" .. target_id .. ".bin"
     return true
 end
 
@@ -210,14 +213,33 @@ local function stage_manager_icon()
     return true
 end
 
-local function bytes_to_words(content)
-    if type(content) ~= "string" or #content ~= STATUS_SIZE then return nil end
-    local words = {}
-    for offset = 1, STATUS_SIZE, 4 do
-        local a, b, c, d = content:byte(offset, offset + 3)
-        words[#words + 1] = a + b * 0x100 + c * 0x10000 + d * 0x1000000
+local function stage_boot_files(target)
+    local boot_bin = read_all(boot_resource, "rb")
+    if not boot_bin then
+        return true
     end
-    return words
+    checkpoint("准备固化启动载荷")
+    local files = {
+        { "/data/canopus/stage1.bin", read_all(stage1_resource, "rb") },
+        { "/data/canopus/stage2.bin", read_all(stage2_resource, "rb") },
+        { "/data/canopus/supervisor.elf", read_all(supervisor_resource, "rb") },
+        { "/data/canopus/boot.lua", boot_bin },
+        { "/data/canopus/boot.target", target },
+        { "/data/canopus/b", "sleep 30\nlua /data/canopus/boot.lua\n" },
+    }
+    for _, item in ipairs(files) do
+        if type(item[2]) ~= "string" then return false, "missing boot payload: " .. item[1] end
+        local output = io.open(item[1], "wb")
+        if not output then return false, "cannot stage " .. item[1] end
+        local write_ok, write_result = pcall(output.write, output, item[2])
+        local close_ok, close_result = pcall(output.close, output)
+        if not write_ok or write_result == nil or not close_ok or close_result == nil
+            or read_all(item[1], "rb") ~= item[2] then
+            return false, "cannot write " .. item[1]
+        end
+    end
+    pcall(os.remove, "/data/canopus/boot.pending")
+    return true
 end
 
 local function signed32(value)
@@ -225,67 +247,65 @@ local function signed32(value)
     return value
 end
 
-local function read_status()
-    local file = control_open(DEVICE_PATH, "rb")
-    if not file then return nil, "cannot open /dev/canopus" end
-    local raw = file:read(STATUS_SIZE)
-    file:close()
-    local words = bytes_to_words(raw)
-    if not words or words[1] ~= EXPECTED_MAGIC then
-        return nil, "supervisor status ABI mismatch"
-    end
-    if words[2] ~= 1 then return nil, "supervisor ABI is not version 1" end
-    if words[10] ~= words[11] or words[10] % 2 ~= 0 then
-        return nil, "supervisor status snapshot is inconsistent"
-    end
-    return {
-        pending_op = words[6],
-        pending_state = words[7],
-        error_code = signed32(words[9]),
-    }
+local function u32le(raw, offset)
+    return (string.unpack("<I4", raw, offset + 1))
 end
 
-local function word(value)
-    value = math.floor(value)
-    return string.char(value % 0x100, math.floor(value / 0x100) % 0x100,
-        math.floor(value / 0x10000) % 0x100,
-        math.floor(value / 0x1000000) % 0x100)
-end
-
-local function write_command(command, arg0)
-    local payload = word(EXPECTED_CMD_MAGIC) .. word(command)
-        .. word(arg0 or 0) .. word(0)
+-- One CPC2 request and its reply, kept together: /dev/canopus has a shared
+-- result mailbox, so nothing may yield between the write and the read.
+local function exchange(command, payload, reply_size)
+    payload = payload or ""
+    request_id = request_id + 1
+    local request = string.pack("<I4I2I2I2I2I4I4I4I4I4I4", CPC2_MAGIC, CPC2_HEADER,
+        1, CPC2_ABI_MAJOR, 0, CPC2_HEADER + #payload, command, request_id, 0, 0, #payload) .. payload
     local file = control_open(DEVICE_PATH, "wb")
-    if not file then return false, "cannot open /dev/canopus" end
-    local write_ok, write_result, write_error = pcall(file.write, file, payload)
-    local close_ok, close_result, close_error = pcall(file.close, file)
-    if not write_ok or write_result == nil then
-        return false, tostring(write_error or write_result or "write failed")
+    if not file then return nil, "cannot open /dev/canopus" end
+    local write_ok, write_result, write_error = pcall(file.write, file, request)
+    -- Closing a character device only reports libc's close status and returns
+    -- no value here, so it carries no protocol meaning. The reply check below
+    -- is what decides whether the request landed.
+    pcall(file.close, file)
+    if not write_ok then return nil, "write: " .. tostring(write_error) end
+    if write_result == nil then
+        return nil, "write: " .. tostring(write_error or "rejected")
     end
-    if not close_ok or close_result == nil then
-        return false, tostring(close_error or close_result or "close failed")
+    file = control_open(DEVICE_PATH, "rb")
+    if not file then return nil, "cannot open /dev/canopus" end
+    local reply = file:read(reply_size)
+    file:close()
+    if type(reply) ~= "string" or #reply ~= reply_size
+        or u32le(reply, 0) ~= CPC2_MAGIC or u32le(reply, 16) ~= command
+        or u32le(reply, 20) ~= request_id then
+        return nil, string.format("supervisor reply ABI mismatch (want %d, got %s)",
+            reply_size, type(reply) == "string" and #reply or type(reply))
     end
-    return true
+    return reply
 end
 
--- Supervisor error codes worth explaining in place. -21 is the one an
--- operator can act on: no heap domain could hold the module image.
+local function device_error()
+    local reply = exchange(CMD_QUERY_DEVICE, nil, CPC2_HEADER + 36)
+    return reply and signed32(u32le(reply, CPC2_HEADER + 24)) or 0
+end
+
+-- Supervisor error codes worth explaining in place.
 local ERROR_HINTS = {
     [-21] = "内存不足：模块镜像放不进内核堆，请缩小模块",
+    [-22] = "模块启动失败，已自动回退到上一版本",
+    [-25] = "模块连续崩溃，已被安全隔离并停用",
+    [-11] = "注册表数据异常，已自动保护",
+    [-6]  = "模块加载失败，请检查模块与设备固件是否兼容",
 }
 
 local function execute_step(command, arg0, description)
     checkpoint(description)
-    local ok, message = write_command(command, arg0)
-    if not ok then return false, message end
-    -- Keep request + status read together: /dev/canopus has a shared result
-    -- mailbox, so yielding here would allow another client to replace it.
-    local current, status_error = read_status()
-    if not current then return false, status_error end
-    if current.pending_op ~= command or current.pending_state ~= RESULT_COMPLETED then
-        local hint = ERROR_HINTS[current.error_code]
-        return false, string.format("result=%d error=%d%s",
-            current.pending_state, current.error_code,
+    local reply, message = exchange(command,
+        command == CMD_INSTALL and string.pack("<I4", arg0 or 0) or nil, CPC2_HEADER)
+    if not reply then return false, message end
+    local result = u32le(reply, 28)
+    if result ~= RESULT_COMPLETED then
+        local code = device_error()
+        local hint = ERROR_HINTS[code]
+        return false, string.format("result=%d error=%d%s", result, code,
             hint and ("\n" .. hint) or "")
     end
     return true
@@ -320,7 +340,7 @@ local function run_all_steps()
     for _, step in ipairs(steps) do
         check(execute_step(step.command, step.arg0, step.progress))
     end
-    return "Run completed\n安装完成，请从应用列表打开管理器"
+    return "Run completed\n已就绪，请在应用列表中打开「Canopus 管理器」"
 end
 
 local rootbase = lvgl.Object(nil, {
@@ -432,7 +452,7 @@ local function make_button(text, color, on_clicked)
     button:clear_flag(lvgl.FLAG.SCROLLABLE)
     button:add_flag(lvgl.FLAG.CLICKABLE)
     if lvgl.FLAG.EVENT_BUBBLE then button:add_flag(lvgl.FLAG.EVENT_BUBBLE) end
-    lvgl.Label(button, {
+    local label = lvgl.Label(button, {
         text_font = lvgl.Font("MiSans-Regular", 16),
         text = text,
         text_color = '#eee',
@@ -442,20 +462,21 @@ local function make_button(text, color, on_clicked)
         local ok, message = pcall(on_clicked)
         if not ok then set_status("Error: " .. tostring(message), '#ff9a9a') end
     end)
-    return button
+    return button, label
 end
 
-run_button = make_button("Run", '#14508a', function()
-    if operation or not resources_available then return end
+-- Returns true once the Run operation has started.
+local function click_run()
+    if operation or not resources_available then return false end
     clear_armed = false
     if profile.device_status == "DEVICE_REJECTED" then
         set_status("LOAD blocked: stage-0 candidate rejected\n"
             .. "Select a replacement candidate before testing.", '#ff9a9a')
-        return
+        return false
     end
     if run_attempted then
-        set_status("Run can only be used once; reboot before retrying")
-        return
+        set_status("单次开机仅可运行一次\n如需重新安装请先重启手环")
+        return false
     end
     run_attempted = true
     start_operation("run", function()
@@ -468,22 +489,26 @@ run_button = make_button("Run", '#14508a', function()
             check(supervisor_present(), "no /dev/canopus")
         end
         check(stage_manager_icon())
+        check(stage_boot_files(target_id))
         return run_all_steps()
     end)
-end)
+    return operation == "run"
+end
+
+run_button = make_button("Run", '#14508a', click_run)
 
 clear_button = make_button("Clear Env", '#8a1f14', function()
     if operation or not resources_available then return end
     if not clear_armed then
         clear_armed = true
-        set_status("Click again to clear", '#ffd27a')
+        set_status("再次点击以确认清理环境", '#ffd27a')
         return
     end
     clear_armed = false
     start_operation("clear", function()
         checkpoint("清理安装环境")
         check(run("rm -rf /data/canopus"), "Clear Env failed")
-        return "Environment cleared; reboot before Run"
+        return "环境已清理，请重启手环后再点击 Run"
     end)
 end)
 

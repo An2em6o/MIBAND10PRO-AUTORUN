@@ -10,57 +10,15 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TARGET_ID=${CANOPUS_TARGET:-xiaomi-band-10-pro-3.101.036}
-LOADER_SRCS=""
 LOADER_OBJECTS=""
-LOADER_PROFILE=""
-TARGET_DEFINES=""
-case "$TARGET_ID" in
-    xiaomi-p65-3.100.043)
-        # Separate exact-address experiment; never stage production approval.
-        exec sh "$ROOT/scripts/build_p65_supervisor.sh"
-        ;;
-    xiaomi-band-11-4.100.139|xiaomi-band-11-4.100.155|xiaomi-band-11-4.100.177)
-        MANAGER_BACKEND="manager/target/band11/canopus_manager_target_band11.c"
-        LOADER_SRCS="runtime/loader/canopus_arm_reloc.c runtime/loader/canopus_elf32_loader.c"
-        TARGET_DEFINES="-DCANOPUS_SUP_BAND11_BOOTSTRAP=1"
-        PROD_FAMILY=xiaomi-band-11
-        MAX_SIZE=131072
-        ;;
-    xiaomi-band-10-pro-3.101.043)
-        MANAGER_BACKEND="manager/target/lvgl_v9/canopus_manager_target_lvgl_v9.c"
-        PROD_FAMILY=xiaomi-band-10-pro
-        MAX_SIZE=73728
-        # Boot-autorun DQ timer primitives, exact addresses for THIS image
-        # (sha256 5193...56ec). lv_timer_create (0xc587ed1) is the generated
-        # veneer's own export and the Manager backend already runs on it.
-        # timer_set_period (0xc16d545) was recovered on the same image by the
-        # Chaos-Module analysis and device-proven there (EVID-CHAOS-DQ-DEVICE-001);
-        # same-image identity is proven by the bit-identical lv_timer_create
-        # match. 3.101.036 is a different image (lv_timer_create 0xc587721) with
-        # NO set_period evidence, so it must NOT define these: the DQ section
-        # compiles out and the BOOT_DQ opcode is rejected as unknown.
-        # lv_timer_del is not exported: the DQ timer is idled down, never
-        # deleted.
-        TARGET_DEFINES="-DCANOPUS_SUP_BOOT_DQ_TIMER_CREATE=0x0C587ED1 -DCANOPUS_SUP_BOOT_DQ_TIMER_SET_PERIOD=0x0C16D545"
-        ;;
-    xiaomi-band-10-pro-3.101.036)
-        MANAGER_BACKEND="manager/target/lvgl_v9/canopus_manager_target_lvgl_v9.c"
-        PROD_FAMILY=xiaomi-band-10-pro
-        MAX_SIZE=73728
-        ;;
-    xiaomi-band-9-3.1.32)
-        MANAGER_BACKEND="manager/target/lvgl_v8/canopus_manager_target_lvgl_v8.c"
-        LOADER_SRCS="runtime/loader/canopus_arm_reloc.c runtime/loader/canopus_elf32_loader.c"
-        LOADER_PROFILE="targets/$TARGET_ID/loader/bootstrap.toml"
-        TARGET_DEFINES="-DCANOPUS_SUP_BAND9_BOOTSTRAP=1"
-        PROD_FAMILY=xiaomi-band-9
-        MAX_SIZE=98304
-        ;;
-    *)
-        echo "error: unsupported supervisor target: $TARGET_ID" >&2
-        exit 2
-        ;;
-esac
+CANOPUS_BIN="$ROOT/target/debug/canopus"
+[ -x "$CANOPUS_BIN" ] || (cd "$ROOT" && cargo build -q -p canopus-cli)
+# Family build data (manager backend, size limit, loader sources, defines).
+TARGET_INFO=$("$CANOPUS_BIN" target info "$TARGET_ID" --targets-dir "$ROOT/targets" --shell) || {
+    echo "error: unsupported supervisor target: $TARGET_ID" >&2
+    exit 2
+}
+eval "$TARGET_INFO"
 BACKEND_OBJECT=$(basename "$MANAGER_BACKEND" .c).o
 
 PACK_DIR="$ROOT/targets/$TARGET_ID"
@@ -70,12 +28,12 @@ OUT="$ROOT/watchfaces/canopus-installer/build/$TARGET_ID"
 if [ -n "$LOADER_SRCS" ]; then
     LOADER_OBJECTS="$OUT/canopus_arm_reloc.o $OUT/canopus_elf32_loader.o"
 fi
-# Stock modlib has no fixed insertion ceiling. Band 9 also carries the portable
+# Stock modlib has no fixed insertion ceiling. Band 11 carries the portable
 # child-module loader because its firmware has no approved insmod command.
 CC=${CC:-clang}
 
 [ -f "$GENERATED" ] || {
-    echo "error: run 'canopus target generate-veneer $TARGET_ID' first"
+    echo "error: run 'canopus target generate $TARGET_ID' first"
     exit 1
 }
 [ -f "$TARGET_CONFIG" ] || {
@@ -84,46 +42,62 @@ CC=${CC:-clang}
 }
 if [ "$PROD_FAMILY" != xiaomi-band-11 ] && ! grep -q '^#define CANOPUS_SUP_PLATFORM_COMPLETE 1$' "$TARGET_CONFIG"; then
     echo "error: supervisor platform ABI is not production-complete for $TARGET_ID" >&2
-    if [ "$PROD_FAMILY" = xiaomi-band-9 ]; then
-        echo "       recover and approve the missing exact-target identity, LVGL v8," >&2
-        echo "       driver, allocator, and MPU veneers before staging prod resources" >&2
-    fi
     exit 2
 fi
 
 mkdir -p "$OUT"
-if [ -n "$LOADER_PROFILE" ]; then
-    python3 "$ROOT/scripts/generate_band9_loader_config.py" \
-        --profile "$ROOT/$LOADER_PROFILE" --target-toml "$PACK_DIR/target.toml" \
-        --header "$OUT/canopus_band9_loader_config.h"
-fi
 cd "$ROOT"
 if [ "$PROD_FAMILY" = xiaomi-band-11 ]; then
-    python3 scripts/generate_band11_native_config.py --target "$TARGET_ID"
+    "$CANOPUS_BIN" target generate "$TARGET_ID" --targets-dir "$ROOT/targets"
+fi
+# Staged Kmem loader targets (Band 9 family): materialize the exact inode /
+# MPU / allocator addresses the platform and stage1/stage2 compile against.
+if [ -f "$PACK_DIR/loader/bootstrap.toml" ]; then
+    python3 "$ROOT/scripts/generate_band9_loader_config.py" \
+        --profile "$PACK_DIR/loader/bootstrap.toml" \
+        --target-toml "$PACK_DIR/target.toml" \
+        --header "$OUT/canopus_band9_loader_config.h"
 fi
 
 echo "[1/3] compile supervisor (Cortex-M33 Thumb soft-float)"
 # Flags mirror native/scripts/build_btpatch_phase5.sh; -fno-function-sections
 # is btpatch's proven configuration for a boot-resident constructor module.
+# Backend selection follows the exact target configuration, not a user opt-in.
+python3 "$ROOT/scripts/generate_l2_probe_config.py" "$TARGET_ID" "$OUT/canopus_l2_probe_config.h"
+python3 "$ROOT/scripts/generate_boot_config.py" "$TARGET_ID" "$OUT/canopus_boot_config.h"
 TARGET_FLAGS="--target=arm-none-eabi -mcpu=cortex-m33 -mthumb -mfloat-abi=soft \
   -ffreestanding -fno-common -fno-builtin -fno-jump-tables \
   -fno-stack-protector -fno-unwind-tables -fno-asynchronous-unwind-tables \
   -fdata-sections -fno-function-sections -Os -Wall -Wextra -Werror \
-  $TARGET_DEFINES"
+  $TARGET_DEFINES ${CANOPUS_SUP_EXTRA_DEFINES:-}"
 
 INC="-I$OUT -I$ROOT/sdk/c -I$ROOT/runtime/lifecycle -I$ROOT/runtime/resources \
   -I$ROOT/runtime/diagnostics -I$ROOT/runtime/control -I$ROOT/runtime/module \
   -I$ROOT/runtime/loader \
   -I$ROOT/manager/service -I$ROOT/manager/protocol -I$ROOT/manager/client \
   -I$ROOT/manager/ui -I$ROOT/manager/package -I$ROOT/manager/target \
-  -I$ROOT/manager/native-app -I$ROOT/app-sdk/ui \
-  -I$ROOT/third_party/monocypher -I$ROOT/third_party/sha256 \
+  -I$ROOT/manager/native-app \
+  -I$ROOT/third_party/sha256 \
   -I$PACK_DIR/generated"
+
+# The LVGL v8 family implements the Manager directly in its backend; the
+# shared v9 UI host does not apply. Everything else still links the runtime.
+UI_HOST_SRC="manager/target/canopus_ui_host.c"
+UI_HOST_OBJECT="$OUT/canopus_ui_host.o"
+if [ "$PROD_FAMILY" = xiaomi-band-9 ]; then
+    UI_HOST_SRC=""
+    UI_HOST_OBJECT=""
+fi
 
 # The v2 transport (CAN-P0-008) pulls the protocol codec and the snapshot
 # helpers into the module; both are freestanding (no libc).
 for s in \
     manager/service/canopus_supervisor.c \
+    manager/service/canopus_supervisor_boot.c \
+    manager/service/canopus_supervisor_services.c \
+    manager/service/canopus_supervisor_upload.c \
+    manager/service/canopus_supervisor_connect.c \
+    manager/service/canopus_supervisor_l2.c \
     manager/service/canopus_supervisor_module.c \
     manager/service/canopus_supervisor_platform.c \
     manager/protocol/canopus_protocol.c \
@@ -131,31 +105,40 @@ for s in \
     manager/package/canopus_installer_bundle.c \
     manager/ui/canopus_manager.c \
     manager/ui/canopus_manager_native.c \
-    app-sdk/ui/canopus_ui.c \
+    runtime/ui/canopus_ui.c \
+    sdk/c/canopus_aeabi_mem.c \
     third_party/sha256/sha256.c \
+    $UI_HOST_SRC \
     "$MANAGER_BACKEND" \
     runtime/control/canopus_control.c \
     runtime/lifecycle/canopus_lifecycle.c \
     runtime/module/canopus_module.c \
     runtime/resources/canopus_resource.c \
+    runtime/hook/canopus_hook.c \
     $LOADER_SRCS; do
     base=$(basename "$s")
-    $CC $TARGET_FLAGS $INC -c "$ROOT/$s" -o "$OUT/${base%.c}.o"
+    # This backend owns layout and native fit arithmetic; prefer minimum code
+    # size within the unchanged Supervisor file/resident budgets.
+    SOURCE_FLAGS=""
+    [ "$s" != manager/target/canopus_ui_host.c ] || SOURCE_FLAGS="-Oz"
+    # Likewise the L2 transport and owner pump: the deep request ring would otherwise take
+    # .155 past its file budget.
+    [ "$s" != manager/service/canopus_supervisor_l2.c ] || SOURCE_FLAGS="-Oz"
+    # And the staging/upload path (not a hot one): with package resources (CPC2 26-28) the .043
+    # Supervisor no longer fits its resident budget otherwise.
+    [ "$s" != manager/service/canopus_supervisor_upload.c ] || SOURCE_FLAGS="-Oz"
+    $CC $TARGET_FLAGS $SOURCE_FLAGS $INC -c "$ROOT/$s" -o "$OUT/${base%.c}.o"
 done
-
-# Monocypher is no longer linked: the Ed25519 receipt signature check was
-# deliberately removed (dev/universal policy, third-party modules must load),
-# and no other supervisor code uses Monocypher. Only the freestanding EABI
-# memory helpers remain: clang may emit __aeabi_memcpy/__aeabi_memclr4 for
-# structure copies in any translation unit.
-$CC $TARGET_FLAGS $INC \
-    -c "$ROOT/third_party/monocypher/canopus_monocypher_compat.c" \
-    -o "$OUT/canopus_monocypher_compat.o"
 
 echo "[2/3] relocatable link (ld.lld -r)"
 ld.lld -r -T "$ROOT/scripts/canopus_supervisor_sections.ld" \
     -o "$OUT/canopus_supervisor.elf" \
     "$OUT/canopus_supervisor.o" \
+    "$OUT/canopus_supervisor_boot.o" \
+    "$OUT/canopus_supervisor_services.o" \
+    "$OUT/canopus_supervisor_upload.o" \
+    "$OUT/canopus_supervisor_connect.o" \
+    "$OUT/canopus_supervisor_l2.o" \
     "$OUT/canopus_supervisor_module.o" \
     "$OUT/canopus_supervisor_platform.o" \
     "$OUT/canopus_protocol.o" \
@@ -164,20 +147,21 @@ ld.lld -r -T "$ROOT/scripts/canopus_supervisor_sections.ld" \
     "$OUT/canopus_manager.o" \
     "$OUT/canopus_manager_native.o" \
     "$OUT/canopus_ui.o" \
-    "$OUT/canopus_monocypher_compat.o" \
+    "$OUT/canopus_aeabi_mem.o" \
     "$OUT/sha256.o" \
+    $UI_HOST_OBJECT \
     "$OUT/$BACKEND_OBJECT" \
     "$OUT/canopus_control.o" \
     "$OUT/canopus_lifecycle.o" \
     "$OUT/canopus_module.o" \
     "$OUT/canopus_resource.o" \
+    "$OUT/canopus_hook.o" \
     $LOADER_OBJECTS
 
-# Drop unreferenced debug/local symbol metadata on stock-modlib targets. Keep
-# all relocation targets, global exports and constructors; runtime sections
-# remain byte-identical. This keeps the additional installer endpoint within
-# the existing 72 KiB package budget without increasing that budget.
-if [ "$PROD_FAMILY" = xiaomi-band-10-pro ]; then
+# Both loaders retain relocation targets, global exports and constructors, but
+# do not consume debug/local metadata or C unwind tables. Strip only unreferenced
+# symbols; --strip-all would remove symbol tables the ELF loaders require.
+if [ "$PROD_FAMILY" = xiaomi-band-10-pro ] || [ "$PROD_FAMILY" = xiaomi-band-11 ]; then
     OBJCOPY=${OBJCOPY:-${RUST_OBJCOPY:-}}
     if [ -z "$OBJCOPY" ]; then
         if command -v llvm-objcopy >/dev/null 2>&1; then
@@ -197,21 +181,23 @@ if [ "$PROD_FAMILY" = xiaomi-band-10-pro ]; then
     RUST_SYSROOT=$(rustc --print sysroot 2>/dev/null || true)
     env DYLD_FALLBACK_LIBRARY_PATH="${RUST_SYSROOT}/lib${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}" \
         LD_LIBRARY_PATH="${RUST_SYSROOT}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-        "$OBJCOPY" --strip-debug --strip-unneeded "$OUT/canopus_supervisor.elf" \
+        "$OBJCOPY" --strip-debug --strip-unneeded \
+            --remove-section=.ARM.exidx --remove-section=.rel.ARM.exidx \
+            "$OUT/canopus_supervisor.elf" \
             "$OUT/canopus_supervisor.stripped.elf"
     mv "$OUT/canopus_supervisor.stripped.elf" "$OUT/canopus_supervisor.elf"
 fi
 
 actual_size=$(wc -c < "$OUT/canopus_supervisor.elf")
 [ "$actual_size" -le "$MAX_SIZE" ] || {
-    echo "error: supervisor is $actual_size bytes; target loader limit is $MAX_SIZE"
+    echo "error: supervisor is $actual_size bytes; target build budget is $MAX_SIZE"
     exit 1
 }
 echo "      module size: $actual_size / $MAX_SIZE bytes"
 
 echo "[3/3] Canopus ELF verifier"
 "$ROOT/target/debug/canopus" verify "$OUT/canopus_supervisor.elf" \
-    --target "$TARGET_ID" --targets-dir "$ROOT/targets"
+    --target "$TARGET_ID" --targets-dir "$ROOT/targets" --max-resident "$MAX_RESIDENT"
 
 TARGET_STAGE="$ROOT/watchfaces/canopus-installer/canopus_supervisor-$TARGET_ID.bin"
 PROD_FAMILY_STAGE="$ROOT/watchfaces/canopus-installer-prod/$PROD_FAMILY"
@@ -225,23 +211,17 @@ cp "$MANAGER_ICON_SOURCE" "$PROD_FAMILY_STAGE/manager_icon.bin"
 cp "$OUT/canopus_supervisor.elf" "$TARGET_STAGE"
 if [ "$PROD_FAMILY" = xiaomi-band-11 ]; then
     python3 "$ROOT/scripts/build_band11_installer.py" --target "$TARGET_ID" --supervisor "$OUT/canopus_supervisor.elf" \
-        --output-dir "${CANOPUS_BAND11_OUTPUT_DIR:-$PROD_FAMILY_STAGE}" \
-        --firmware "${CANOPUS_BAND11_FIRMWARE:-$ROOT/fwbins/$TARGET_ID/vela_ap.bin}"
+        --output-dir "${CANOPUS_BAND11_OUTPUT_DIR:-$PROD_FAMILY_STAGE}"
 elif [ "$PROD_FAMILY" = xiaomi-band-9 ]; then
-    CANOPUS_INSTALLER_STAGE_ROOT="$ROOT/watchfaces/canopus-installer" \
-        "$ROOT/scripts/build_band9_bootstrap.sh" "$TARGET_ID" "$OUT"
     CANOPUS_INSTALLER_STAGE_ROOT="$PROD_FAMILY_STAGE" \
-        "$ROOT/scripts/build_band9_bootstrap.sh" "$TARGET_ID" "$OUT"
-    echo "staged flat canopus-installer-prod/$PROD_FAMILY resources for $TARGET_ID"
+        sh "$ROOT/scripts/build_band9_bootstrap.sh" "$TARGET_ID" "$OUT"
+    echo "staged canopus-installer-prod/$PROD_FAMILY/ (main.lua + stage1/stage2/profile/supervisor)"
 else
     mkdir -p "$PROD_FAMILY_STAGE"
     PROD_TARGET_STAGE="$PROD_FAMILY_STAGE/canopus_supervisor-$TARGET_ID.bin"
     cp "$OUT/canopus_supervisor.elf" "$PROD_TARGET_STAGE"
+    python3 "$ROOT/scripts/generate_boot_config.py" "$TARGET_ID" "$PROD_FAMILY_STAGE/canopus_boot-$TARGET_ID.bin" --payload
     echo "staged canopus-installer-prod/$PROD_FAMILY/$(basename "$PROD_TARGET_STAGE")"
 fi
 rm -f "$ROOT/watchfaces/canopus-installer/canopus_supervisor.bin" \
-      "$ROOT/watchfaces/canopus-installer-prod/canopus_supervisor.bin" \
-      "$ROOT/watchfaces/canopus-installer/canopus_supervisor-band9.bin" \
-      "$ROOT/watchfaces/canopus-installer/canopus_supervisor-band9.elf" \
-      "$ROOT/watchfaces/canopus-installer/canopus_stage2-band9.bin" \
-      "$ROOT/watchfaces/canopus-installer/canopus_stage1_band9.lua"
+      "$ROOT/watchfaces/canopus-installer-prod/canopus_supervisor.bin"

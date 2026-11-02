@@ -4,7 +4,7 @@
  * Host-testable view/controller layer for the device Manager:
  *   - device page   (identity / target / framework / firmware metadata)
  *   - module list   (id + lifecycle state, one line each)
- *   - module detail (lifecycle, class, capability, signature, risk, the
+ *   - module detail (lifecycle, class, capability, risk, the
  *                    operations that are ACTUALLY available for that class)
  *
  * Operations go through the versioned supervisor protocol (canopus_protocol)
@@ -26,6 +26,7 @@ extern "C" {
 
 #define CANOPUS_MANAGER_MAX_MODULES 16u
 #define CANOPUS_MANAGER_MODULE_ID_MAX 32u
+#define CANOPUS_MANAGER_UI_LABEL_MAX 24u
 
 /* Views. */
 enum canopus_manager_view {
@@ -47,10 +48,12 @@ struct canopus_manager_module_v1 {
     uint32_t state;           /* CANOPUS_STATE_* */
     uint32_t flags;           /* CANOPUS_FLAG_* */
     uint32_t version;
-    uint32_t signature_ok;    /* 1 = signature verified, 0 = unsigned/dev */
     uint32_t risk;
     uint32_t has_previous;    /* rollback target exists */
     int32_t activation_error;
+    uint32_t slot;            /* Supervisor slot, for the module's own UI page */
+    uint32_t has_ui;          /* the module registered a UI page entry */
+    char ui_label[CANOPUS_MANAGER_UI_LABEL_MAX];
 };
 
 struct canopus_manager_model_v1 {
@@ -65,6 +68,7 @@ struct canopus_manager_model_v1 {
     uint32_t selected;        /* index into modules */
     uint32_t view;            /* canopus_manager_view */
     uint32_t safe_mode;       /* 1 = safe mode requested/active */
+    uint32_t safe_mode_reason;
     /* Last supervisor error_code (CANOPUS_SUP_ERR_*), negative on failure.
      * A non-zero value is surfaced on the overview so a silently-failed
      * registry save/restore or package stage is visible, not just a returned
@@ -128,6 +132,8 @@ int canopus_manager_render_module_detail(const struct canopus_manager_model_v1 *
 
 uint32_t canopus_manager_op_install(struct canopus_manager_model_v1 *m,
                                     const char *package_ref);
+/* Discover completed native staging pairs in the Canopus inbox. */
+uint32_t canopus_manager_op_scan(struct canopus_manager_model_v1 *m);
 uint32_t canopus_manager_op_activate(struct canopus_manager_model_v1 *m,
                                      uint32_t index);
 uint32_t canopus_manager_op_enable(struct canopus_manager_model_v1 *m,
@@ -136,11 +142,14 @@ uint32_t canopus_manager_op_disable(struct canopus_manager_model_v1 *m,
                                     uint32_t index);
 uint32_t canopus_manager_op_remove(struct canopus_manager_model_v1 *m,
                                    uint32_t index);
-uint32_t canopus_manager_op_update(struct canopus_manager_model_v1 *m,
-                                   uint32_t index);
 uint32_t canopus_manager_op_rollback(struct canopus_manager_model_v1 *m,
                                      uint32_t index);
 uint32_t canopus_manager_op_safe_mode(struct canopus_manager_model_v1 *m);
+/* Leaves safe mode at the next boot. `action` is a canopus_safe_exit_action
+ * (0 keep the modules, 1 disable them all, 2 roll them all back). The model
+ * stays in safe mode: nothing changes until the device restarts. */
+uint32_t canopus_manager_op_exit_safe_mode(struct canopus_manager_model_v1 *m,
+                                           uint32_t action);
 
 /* ---- availability helpers (for the detail page) ------------------ */
 /* Returns non-zero when the operation is available for the module. */
@@ -151,8 +160,6 @@ int canopus_manager_can_enable(const struct canopus_manager_model_v1 *m,
 int canopus_manager_can_disable(const struct canopus_manager_model_v1 *m,
                                 uint32_t index);
 int canopus_manager_can_remove(const struct canopus_manager_model_v1 *m,
-                               uint32_t index);
-int canopus_manager_can_update(const struct canopus_manager_model_v1 *m,
                                uint32_t index);
 int canopus_manager_can_rollback(const struct canopus_manager_model_v1 *m,
                                  uint32_t index);

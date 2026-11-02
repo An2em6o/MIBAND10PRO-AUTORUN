@@ -9,14 +9,14 @@ CFLAGS ?= -std=c11 -Wall -Wextra -Werror -g -O0
 
 INC = -I. -I../../sdk/c -I../../runtime/lifecycle -I../../runtime/resources \
       -I../../runtime/diagnostics -I../../runtime/control -I../../runtime/module \
-      -I../../runtime/loader \
+      -I../../runtime/loader -I../../runtime/hook \
       -I../../modules/examples/hello -I../../manager/protocol -I../../manager/storage \
       -I../../manager/ui -I../../manager/service -I../../manager/client \
-      -I../../manager/native-app -I../../manager/package -I../../manager/target/p65 \
-      -I../../tests/host -I../../targets/xiaomi-p65-3.100.043/generated \
-      -I../../third_party/monocypher \
-      -I../../app-sdk/c -I../../app-sdk/launcher -I../../app-sdk/ui
-CFLAGS += -DCANOPUS_HOST=1
+      -I../../manager/native-app -I../../manager/package \
+      -I../../tests/host \
+      -I../../runtime/ui -I../../runtime/app -I../../manager/target \
+      -I../../third_party/sha256
+override CFLAGS += -DCANOPUS_HOST=1
 
 # Bare-metal portable sources (freestanding, no libc) — the cross-thumb
 # sanity build checks exactly these.
@@ -28,23 +28,22 @@ PORTABLE_SRCS = \
 	../../runtime/module/canopus_module.c \
 	../../runtime/loader/canopus_arm_reloc.c \
 	../../runtime/loader/canopus_elf32_loader.c \
+	../../runtime/hook/canopus_hook.c \
 	../../manager/protocol/canopus_protocol.c \
 	../../manager/client/canopus_client.c \
 	../../manager/service/canopus_supervisor.c \
+	../../manager/service/canopus_supervisor_boot.c \
+	../../manager/service/canopus_supervisor_upload.c \
+	../../third_party/sha256/sha256.c \
+	../../manager/service/canopus_supervisor_connect.c \
+	../../manager/service/canopus_supervisor_services.c \
 	../../manager/package/canopus_installer_bundle.c \
-	../../third_party/monocypher/monocypher.c \
-	../../third_party/monocypher/monocypher-ed25519.c \
 	../../manager/ui/canopus_manager.c \
 	../../manager/ui/canopus_manager_native.c \
-	../../manager/target/p65/canopus_manager_p65_rows.c \
-	../../manager/target/p65/canopus_manager_p65_lvx.c \
-	../../manager/target/p65/canopus_manager_p65_backend.c \
-	../../manager/target/p65/canopus_manager_p65_registry.c \
-	../../manager/target/p65/canopus_manager_p65_transport.c \
 	../../manager/native-app/canopus_manager_app.c \
-	../../app-sdk/c/canopus_app.c \
-	../../app-sdk/ui/canopus_ui.c \
-	../../app-sdk/launcher/canopus_ordered_list.c
+	../../runtime/app/canopus_app.c \
+	../../runtime/ui/canopus_ui.c \
+	../../manager/target/canopus_ordered_list.c
 
 # Host test build additionally links the libc-dependent layers
 # (storage, POSIX client adapter, fake target, hello module).
@@ -69,37 +68,49 @@ TEST_SRCS = \
 	test_manager_app.c \
 	test_app_sdk.c \
 	test_ui.c \
-	test_p65_ui_rows.c \
-	test_p65_lvx_adapter.c \
-	test_p65_local_client.c \
-	test_p65_registry_store.c \
-	test_p65_registry_firmware.c \
 	test_client.c \
 	test_supervisor_device.c \
+	test_supervisor_update.c \
+	test_supervisor_upload.c \
+	test_supervisor_services.c \
+	test_hook.c \
 	test_installer_receipt.c \
 	test_arm_reloc.c
 
 BIN = canopus_host_tests
+SLEEP_BIN = canopus_sleep_test
+BOOT_BIN = canopus_boot_test
 ELF_LOADER_HARNESS = elf_loader_harness
-BAND9_ELF ?= ../../../Canopus-Module-BluetoothAudio/build/xiaomi-band-9-pro-3.1.175/bluetooth-audio.elf
+MODULE_ELF ?= ../../../Canopus-Module-BluetoothAudio/build/xiaomi-band-10-pro-3.101.036/bluetooth-audio.elf
 
 .PHONY: all run clean cross-arm64 cross-thumb real-elf-loader
 
-all: $(BIN)
+all: $(BIN) $(SLEEP_BIN) $(BOOT_BIN)
 
 $(BIN): $(RUNTIME_SRCS) $(TEST_SRCS) ../../sdk/c/canopus_abi.h ../../sdk/c/canopus_runtime.h
 	$(CC) $(CFLAGS) $(INC) $(RUNTIME_SRCS) $(TEST_SRCS) -o $(BIN)
 
-run: $(BIN)
-	./$(BIN)
+run: $(BIN) $(SLEEP_BIN) $(BOOT_BIN)
+	$(abspath $(BIN))
+	$(abspath $(SLEEP_BIN))
+	$(abspath $(BOOT_BIN)) 036
+	$(abspath $(BOOT_BIN)) 043
+	$(abspath $(BOOT_BIN)) 155
+	$(abspath $(BOOT_BIN)) 179
+
+$(SLEEP_BIN): $(PORTABLE_SRCS) test_service_sleep.c
+	$(CC) $(CFLAGS) -ffreestanding $(INC) $^ -o $@
+
+$(BOOT_BIN): $(PORTABLE_SRCS) test_supervisor_boot.c
+	$(CC) $(CFLAGS) $(INC) $^ -o $@
 
 $(ELF_LOADER_HARNESS): ../../runtime/loader/canopus_arm_reloc.c \
 		../../runtime/loader/canopus_elf32_loader.c elf_loader_harness.c
 	$(CC) $(CFLAGS) -I../../sdk/c -I../../runtime/loader $^ -o $@
 
 real-elf-loader: $(ELF_LOADER_HARNESS)
-	test -f $(BAND9_ELF)
-	./$(ELF_LOADER_HARNESS) $(BAND9_ELF)
+	test -f $(MODULE_ELF)
+	./$(ELF_LOADER_HARNESS) $(MODULE_ELF)
 
 # Sanity: the bare-metal portable runtime must compile for the actual target
 # profile (Cortex-M33 Thumb soft-float). Only compile+assemble, no link.
@@ -112,4 +123,4 @@ cross-thumb:
 		-DCANOPUS_HOST=1 $(INC) -c $(PORTABLE_SRCS)
 
 clean:
-	rm -f $(BIN) $(ELF_LOADER_HARNESS) *.o
+	rm -f $(BIN) $(SLEEP_BIN) $(BOOT_BIN) $(ELF_LOADER_HARNESS) *.o

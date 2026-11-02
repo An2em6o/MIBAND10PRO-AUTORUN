@@ -22,8 +22,22 @@ pub fn target(cmd: TargetCmd) -> anyhow::Result<()> {
             println!("target OK: {}", canopus_core::registry::describe(&pack));
             Ok(())
         }
-        TargetCmd::List { targets_dir } => {
-            let packs = list_target_packs(&targets_dir)?;
+        TargetCmd::List {
+            targets_dir,
+            active,
+            names,
+        } => {
+            let targets_dir = crate::env::targets_dir(targets_dir)?;
+            let mut packs = list_target_packs(&targets_dir)?;
+            if active {
+                packs.retain(|p| p.status.as_deref() != Some("frozen"));
+            }
+            if names {
+                for p in &packs {
+                    println!("{}", p.target_id);
+                }
+                return Ok(());
+            }
             if packs.is_empty() {
                 println!("no target packs found under {}", targets_dir.display());
                 return Ok(());
@@ -38,91 +52,84 @@ pub fn target(cmd: TargetCmd) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        TargetCmd::GenerateVeneer {
+        TargetCmd::Generate {
             target,
+            all,
+            check,
             targets_dir,
-            output,
-            config_output,
         } => {
-            let pack = find_target(&targets_dir, &target)?;
-            let root = targets_dir.join(&target);
-            let (symbols, types) = canopus_core::veneer::load_records(&root)?;
-            let r#gen = canopus_core::veneer::VeneerGen {
-                pack: &pack,
-                symbols: &symbols,
-                types: &types,
+            let targets_dir = crate::env::targets_dir(targets_dir)?;
+            let packs = match (target, all) {
+                (Some(id), false) => {
+                    let id = crate::env::resolve_target(&targets_dir, &id)?;
+                    vec![canopus_core::generate::pack_by_id(&targets_dir, &id)?]
+                }
+                (None, true) => canopus_core::generate::active_targets(&targets_dir)?,
+                _ => anyhow::bail!("specify either a target id or --all"),
             };
-            let text = r#gen.generate();
-            let out = output.unwrap_or_else(|| root.join("generated").join("canopus_veneer.h"));
-            if let Some(parent) = out.parent() {
-                std::fs::create_dir_all(parent)?;
+            let mut stale = Vec::new();
+            for pack in &packs {
+                let outputs = canopus_core::generate::outputs_for(&targets_dir, pack)?;
+                for path in canopus_core::generate::apply(&outputs, check)? {
+                    if check {
+                        stale.push(path);
+                    } else {
+                        println!("wrote {}", path.display());
+                    }
+                }
             }
-            std::fs::write(&out, text)?;
-            let config_gen = canopus_core::target_config::TargetConfigGen {
-                pack: &pack,
-                symbols: &symbols,
-            };
-            let config_out = config_output
-                .unwrap_or_else(|| root.join("generated").join("canopus_target_config.h"));
-            if let Some(parent) = config_out.parent() {
-                std::fs::create_dir_all(parent)?;
+            if !stale.is_empty() {
+                for path in &stale {
+                    eprintln!("stale: {}", path.display());
+                }
+                anyhow::bail!(
+                    "{} generated file(s) are stale; run `canopus target generate --all`",
+                    stale.len()
+                );
             }
-            std::fs::write(&config_out, config_gen.generate())?;
-            println!(
-                "wrote veneer header {} and target config {} ({} callable, {} types, {} symbols)",
-                out.display(),
-                config_out.display(),
-                symbols
-                    .iter()
-                    .filter(|s| s.kind == "function"
-                        && s.callable_address.is_some()
-                        && s.status != "FORBIDDEN"
-                        && s.status != "WITHDRAWN"
-                        && s.policy != "restricted")
-                    .count(),
-                types.len(),
-                symbols.len()
-            );
+            if check {
+                println!("generated files up to date ({} target(s))", packs.len());
+            }
             Ok(())
         }
-        TargetCmd::GenerateRustBindings {
+        TargetCmd::Info {
             target,
             targets_dir,
-            output,
+            shell,
+            json,
         } => {
-            let pack = find_target(&targets_dir, &target)?;
-            let root = targets_dir.join(&target);
-            let (symbols, types) = canopus_core::veneer::load_records(&root)?;
-            let r#gen = canopus_core::rustgen::RustGen {
-                pack: &pack,
-                symbols: &symbols,
-                types: &types,
-            };
-            let text = r#gen.generate();
-            /* CAN-P2-011: the sdk/rust crate's generated.rs is the single
-             * committed copy; the per-target generated/ directory holds the
-             * C veneer only. */
-            let out = output.unwrap_or_else(|| {
-                root.join("../../sdk/rust/canopus-target-generated/src/generated.rs")
-            });
-            if let Some(parent) = out.parent() {
-                std::fs::create_dir_all(parent)?;
+            let targets_dir = crate::env::targets_dir(targets_dir)?;
+            let target = crate::env::resolve_target(&targets_dir, &target)?;
+            let pack = canopus_core::generate::pack_by_id(&targets_dir, &target)?;
+            let family = pack
+                .family
+                .as_deref()
+                .map(|f| canopus_core::family::load_family(&targets_dir, f))
+                .transpose()?;
+            if shell {
+                let family = family.ok_or_else(|| {
+                    anyhow::anyhow!("target {target} has no family; no build data")
+                })?;
+                let q = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
+                println!("MANAGER_BACKEND={}", q(&family.manager_backend));
+                println!("MAX_SIZE={}", family.supervisor_max_size);
+                println!("MAX_RESIDENT={}", family.supervisor_max_resident);
+                println!("LOADER_SRCS={}", q(&family.loader_sources.join(" ")));
+                println!("TARGET_DEFINES={}", q(&family.defines.join(" ")));
+                println!("PROD_FAMILY={}", q(&family.prod_family));
+            } else if json {
+                let mut value = serde_json::json!({ "pack": pack, "family": family });
+                if family.as_ref().is_some_and(|f| f.native_config) {
+                    let cfg = canopus_core::native_config::load(&targets_dir.join(&target), &pack)?;
+                    value["native"] = serde_json::json!({
+                        "profile": cfg.profile,
+                        "addresses": cfg.addresses,
+                    });
+                }
+                println!("{}", serde_json::to_string_pretty(&value)?);
+            } else {
+                println!("{}", canopus_core::registry::describe(&pack));
             }
-            std::fs::write(&out, text)?;
-            println!(
-                "wrote Rust bindings {} ({} callable, {} types, {} symbols)",
-                out.display(),
-                symbols
-                    .iter()
-                    .filter(|s| s.kind == "function"
-                        && s.callable_address.is_some()
-                        && s.status != "FORBIDDEN"
-                        && s.status != "WITHDRAWN"
-                        && s.policy != "restricted")
-                    .count(),
-                types.len(),
-                symbols.len()
-            );
             Ok(())
         }
     }
@@ -204,19 +211,10 @@ pub fn module(cmd: ModuleCmd) -> anyhow::Result<()> {
                 "rust" => canopus_core::template::ModuleLang::Rust,
                 other => anyhow::bail!("unknown language '{other}' (expected c or rust)"),
             };
-            let target_pack = find_target(&targets_dir, &target)?;
-            let constructor_discovery = target_pack
-                .loader_profile
-                .as_ref()
-                .map(|profile| profile.constructor_discovery.as_str())
-                .unwrap_or("init_array");
-            let files = canopus_core::template::render_with_constructor_discovery(
-                &name,
-                &target,
-                lang,
-                constructor_discovery,
-            )
-            .map_err(anyhow::Error::msg)?;
+            let targets_dir = crate::env::targets_dir(targets_dir)?;
+            let target = crate::env::resolve_target(&targets_dir, &target)?;
+            find_target(&targets_dir, &target)?;
+            let files = canopus_core::template::render(&name, &target, lang);
             let dir = out_dir.join(&name);
             std::fs::create_dir_all(&dir)?;
             let mut n = 0;
@@ -276,7 +274,6 @@ pub fn package(cmd: PackageCmd) -> anyhow::Result<()> {
             artifact,
             resource,
             output,
-            key,
         } => {
             let value = load_json(&manifest)?;
             validate(SchemaKind::Package, &value)?;
@@ -301,12 +298,8 @@ pub fn package(cmd: PackageCmd) -> anyhow::Result<()> {
 
             let pkg = canopus_package::manifest_with_real_hashes(&pkg, &files, &resource_files)?;
             let archive = canopus_package::build_archive(&pkg, &files, &resource_files)?;
-            let signed = match key {
-                Some(k) => canopus_package::sign_archive(&archive, &k)?,
-                None => archive,
-            };
-            let len = signed.len();
-            std::fs::write(&output, &signed)?;
+            let len = archive.len();
+            std::fs::write(&output, &archive)?;
             println!(
                 "wrote {} ({} bytes, {} artifact(s))",
                 output.display(),
@@ -315,33 +308,15 @@ pub fn package(cmd: PackageCmd) -> anyhow::Result<()> {
             );
             Ok(())
         }
-        PackageCmd::Sign { pkg, key, output } => {
+        PackageCmd::Verify { pkg } => {
             let archive = std::fs::read(&pkg)?;
-            let signed = canopus_package::sign_archive(&archive, &key)?;
-            let out = output.unwrap_or(pkg);
-            std::fs::write(&out, signed)?;
-            println!("signed {} ({}-byte signature appended)", out.display(), 64);
-            Ok(())
-        }
-        PackageCmd::Verify { pkg, pubkey } => {
-            let archive = std::fs::read(&pkg)?;
-            match canopus_package::verify_archive(&archive, &pubkey) {
-                Ok(()) => {
-                    println!("signature OK");
-                    Ok(())
-                }
-                Err(e) => Err(anyhow::anyhow!("{e}")),
-            }
-        }
-        PackageCmd::Keygen { output } => {
-            let (secret, public) = canopus_package::keygen()?;
-            if let Some(out) = output {
-                std::fs::write(&out, format!("{secret}\n{public}\n"))?;
-                println!("wrote key pair to {}", out.display());
-            } else {
-                println!("secret: {secret}");
-                println!("public: {public}");
-            }
+            let manifest = canopus_package::verify_archive(&archive)?;
+            println!(
+                "package OK: {} v{} ({} artifact(s))",
+                manifest.package_id,
+                manifest.version,
+                manifest.artifacts.len()
+            );
             Ok(())
         }
     }
@@ -391,23 +366,62 @@ pub fn build_plan(manifest_path: &Path, targets_dir: &Path, json: bool) -> anyho
 
 pub fn verify(
     elf_path: &Path,
-    target_id: &str,
+    target_id: Option<&str>,
+    portable: bool,
     targets_dir: &Path,
     json: bool,
+    extra_allowed: &[u64],
+    max_resident: Option<u64>,
 ) -> anyhow::Result<()> {
-    let pack = find_target(targets_dir, target_id)?;
+    let (pack, allowed) = if portable {
+        // A portable module must not embed an address that is meaningful on
+        // ANY registered firmware: scan against the union of every target's
+        // address space with an empty allowlist.
+        let packs = list_target_packs(targets_dir)?;
+        let mut base = packs
+            .first()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("no target packs under {}", targets_dir.display()))?;
+        let mut ranges: Vec<canopus_core::model::AddressRange> = packs
+            .iter()
+            .filter_map(|p| p.firmware_address_ranges.clone())
+            .flatten()
+            .collect();
+        ranges.sort_by_key(|r| (r.base, r.size));
+        ranges.dedup_by_key(|r| (r.base, r.size));
+        base.firmware_address_ranges = Some(ranges);
+        (base, Vec::new())
+    } else {
+        let id = target_id.ok_or_else(|| anyhow::anyhow!("--target is required"))?;
+        let mut allowed = build_allowed_addresses(targets_dir, id);
+        allowed.extend_from_slice(extra_allowed);
+        allowed.sort_unstable();
+        allowed.dedup();
+        (
+            find_target(targets_dir, id)?,
+            allowed,
+        )
+    };
     let data = std::fs::read(elf_path)
         .map_err(|e| anyhow::anyhow!("cannot read {}: {e}", elf_path.display()))?;
 
     // CAN-P1-011: the absolute-address allowlist is the target's own symbol
     // table (entry + callable addresses). Embedded firmware-range addresses
     // in the module must all appear here.
-    let allowed = build_allowed_addresses(targets_dir, target_id);
     let verifier = Verifier {
         target: &pack,
         allowed_addresses: &allowed,
     };
-    let report = verifier.verify(&data);
+    let mut report = verifier.verify(&data);
+    if let Some(max) = max_resident {
+        if report.summary.resident_bytes > max {
+            report.ok = false;
+            report.errors.push(format!(
+                "resident size {} bytes exceeds the {max} byte budget",
+                report.summary.resident_bytes
+            ));
+        }
+    }
 
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -421,9 +435,10 @@ pub fn verify(
         }
         let s = &report.summary;
         println!(
-            "summary: {} ({} sections, {} undefined, {} relocs, {} ctors, {} dtors)",
+            "summary: {} ({} sections, {} resident bytes, {} undefined, {} relocs, {} ctors, {} dtors)",
             if report.ok { "PASS" } else { "FAIL" },
             s.section_count,
+            s.resident_bytes,
             s.undefined_symbols,
             s.relocation_count,
             s.constructor_count,
@@ -603,110 +618,17 @@ pub fn re(cmd: ReCmd) -> anyhow::Result<()> {
             println!("gate for {id}: {d:?}");
             Ok(())
         }
-        ReCmd::RevisionSign {
-            target,
-            revision,
-            key,
-            output,
-            targets_dir,
-        } => re_revision_sign(&target, revision, &key, &output, &targets_dir),
-        ReCmd::RevisionVerify { manifest, pubkey } => {
-            let data = std::fs::read(&manifest)?;
-            let signed: serde_json::Value = serde_json::from_slice(&data)?;
-            let m: canopus_re::revision::RevisionManifest =
-                serde_json::from_value(signed["manifest"].clone())?;
-            let sig = signed["signature"]
-                .as_str()
-                .ok_or_else(|| anyhow::anyhow!("no signature in manifest"))?;
-            m.verify(&pubkey, sig)
-                .map_err(|e| anyhow::anyhow!("verify failed: {e}"))?;
-            println!(
-                "revision {} of {}: signature VALID",
-                m.revision, m.target_id
-            );
-            Ok(())
-        }
         ReCmd::Probe {
             target,
             symbol,
             targets_dir,
             output,
-        } => re_probe(&target, &symbol, &targets_dir, &output),
-    }
-}
-
-/// Signs a target-pack revision manifest (CAN-RE-009).
-fn re_revision_sign(
-    target: &str,
-    revision: u32,
-    key: &str,
-    output: &Option<PathBuf>,
-    targets_dir: &Path,
-) -> anyhow::Result<()> {
-    let pack = find_target(targets_dir, target)?;
-    let root = targets_dir.join(target);
-    let (symbols, types) = canopus_core::veneer::load_records(&root)?;
-    let evidence_dir = root.join("evidence");
-
-    // content digest over symbols + types (sorted, stable).
-    let mut entries: Vec<Vec<u8>> = Vec::new();
-    for sub in ["symbols", "types"] {
-        let d = root.join(sub);
-        if !d.is_dir() {
-            continue;
-        }
-        let mut files: Vec<_> = std::fs::read_dir(&d)?
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
-            .collect();
-        files.sort();
-        for f in files {
-            entries.push(std::fs::read(&f)?);
+        } => {
+            let targets_dir = crate::env::targets_dir(targets_dir)?;
+            let target = crate::env::resolve_target(&targets_dir, &target)?;
+            re_probe(&target, &symbol, &targets_dir, &output)
         }
     }
-    let content_sha256 = {
-        use sha2::{Digest, Sha256};
-        let mut h = Sha256::new();
-        for e in &entries {
-            h.update(e);
-        }
-        hex::encode(h.finalize())
-    };
-    let evidence_count = if evidence_dir.is_dir() {
-        std::fs::read_dir(&evidence_dir)?.count() as u32
-    } else {
-        0
-    };
-
-    let m = canopus_re::revision::RevisionManifest {
-        target_id: pack.target_id.clone(),
-        revision,
-        firmware_sha256: pack.firmware_sha256.clone(),
-        content_sha256,
-        symbol_count: symbols.len() as u32,
-        type_count: types.len() as u32,
-        evidence_count,
-        schema_version: 1,
-    };
-    let signature = m
-        .sign(key)
-        .map_err(|e| anyhow::anyhow!("sign failed: {e}"))?;
-    let doc = serde_json::json!({ "manifest": m, "signature": signature });
-    let out = output.clone().unwrap_or_else(|| {
-        root.join("generated")
-            .join(format!("revision-v{revision}.json"))
-    });
-    if let Some(p) = out.parent() {
-        std::fs::create_dir_all(p)?;
-    }
-    std::fs::write(&out, serde_json::to_vec_pretty(&doc)?)?;
-    println!(
-        "signed revision {revision} of {target} (digest {}) -> {}",
-        m.canonical_digest(),
-        out.display()
-    );
-    Ok(())
 }
 
 /// Emits a minimal, safe C probe module for a callable symbol (RE-008).
@@ -761,75 +683,4 @@ int probe_{name}_run(void)
     std::fs::write(&out, text)?;
     println!("wrote probe {}", out.display());
     Ok(())
-}
-
-// ---------------------------------------------------------------- key
-
-use crate::KeyCmd;
-use canopus_package::keyroles::{KeyCert, KeyRole, RevocationList, certify, check_cert_revoked};
-
-fn parse_role(s: &str) -> anyhow::Result<KeyRole> {
-    Ok(match s {
-        "dev" => KeyRole::Dev,
-        "production" => KeyRole::Production,
-        other => anyhow::bail!("unknown key role '{other}' (expected dev or production)"),
-    })
-}
-
-pub fn key(cmd: KeyCmd) -> anyhow::Result<()> {
-    match cmd {
-        KeyCmd::RoleCert { role, public, note } => {
-            let role = parse_role(&role)?;
-            let cert = certify(role, &public, note.as_deref().unwrap_or(""));
-            let text = serde_json::to_string_pretty(&cert)?;
-            println!("{text}");
-            Ok(())
-        }
-        KeyCmd::Revoke {
-            fingerprint,
-            role,
-            key,
-            list,
-        } => {
-            let role = parse_role(&role)?;
-            let path = std::path::Path::new(&list);
-            let mut rl = if path.exists() {
-                RevocationList::load(path).map_err(|e| anyhow::anyhow!(e))?
-            } else {
-                RevocationList::new_empty(role)
-            };
-            rl.add(&fingerprint);
-            rl.sign(&key).map_err(|e| anyhow::anyhow!("sign: {e}"))?;
-            rl.save(path).map_err(|e| anyhow::anyhow!(e))?;
-            println!(
-                "revoked {} (list now has {} entries, signer={})",
-                fingerprint,
-                rl.revoked.len(),
-                rl.signer_role.as_str()
-            );
-            Ok(())
-        }
-        KeyCmd::Check { cert, list } => {
-            let path = std::path::Path::new(&list);
-            if !path.exists() {
-                anyhow::bail!("revocation list not found: {list}");
-            }
-            let rl = RevocationList::load(path).map_err(|e| anyhow::anyhow!(e))?;
-            let cdata = std::fs::read_to_string(&cert)?;
-            let c: KeyCert = serde_json::from_str(&cdata)?;
-            rl.verify(&c).map_err(|e| anyhow::anyhow!(e))?;
-            match check_cert_revoked(&c, &rl) {
-                Ok(()) => println!(
-                    "cert {} ({}): NOT revoked",
-                    c.role.as_str(),
-                    &c.fingerprint[..16.min(c.fingerprint.len())]
-                ),
-                Err(e) => {
-                    println!("{}", e);
-                    std::process::exit(2);
-                }
-            }
-            Ok(())
-        }
-    }
 }

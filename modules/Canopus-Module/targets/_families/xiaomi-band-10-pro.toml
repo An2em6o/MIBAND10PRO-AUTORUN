@@ -1,0 +1,20 @@
+# Shared build and generation data for Xiaomi Band 10 Pro targets.
+manager_backend = "manager/target/canopus_manager_target.c"
+# Build thresholds, not proven loader hard limits. Raised 114688 -> 131072 on
+# 2026-10-22 for the native UI framework (measured 119224 B after stripping),
+# and 131072 -> 133120 (+2048 B) on 2026-10-23 for arbitrary UI font sizing +
+# image fit (Band 11 .155 measured 131440 B before defensive ablation and
+# 131012 B after trimming; device loading remains unproven / NOT_PROBED).
+# Resident remains a real RAM-slot bound and is unchanged.
+supervisor_max_size = 133120
+# Raised 163840 -> 172032 (+8192 B) on 2026-10-26 for multi-page module UI
+# entries (canopus_ui_entry_v1.page_count); measured 167562 B on .043. This was
+# documented as a real RAM-slot bound rather than a build budget, so the raise
+# is an explicit maintainer decision and device loading stays NOT_PROBED.
+supervisor_max_resident = 172032
+loader_sources = []
+defines = []
+prod_family = "xiaomi-band-10-pro"
+# Hand-written sdk/rust/canopus-target-private facade consumes generated_symbols_<rust_module>.rs.
+private_symbols = true
+native_config = false

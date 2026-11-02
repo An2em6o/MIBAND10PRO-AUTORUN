@@ -20,6 +20,7 @@ enum canopus_manager_native_route {
     CANOPUS_MANAGER_ROUTE_OVERVIEW = 1,
     CANOPUS_MANAGER_ROUTE_MODULES,
     CANOPUS_MANAGER_ROUTE_MODULE_DETAIL,
+    CANOPUS_MANAGER_ROUTE_MODULE_UI, /* the page the selected module registered */
 };
 
 typedef int32_t (*canopus_manager_native_route_v1)(
@@ -38,12 +39,15 @@ enum canopus_manager_native_event {
     CANOPUS_MANAGER_EVENT_SAFE_MODE,
     CANOPUS_MANAGER_EVENT_ENABLE,
     CANOPUS_MANAGER_EVENT_DISABLE,
-    CANOPUS_MANAGER_EVENT_UPDATE,
     CANOPUS_MANAGER_EVENT_ROLLBACK,
     CANOPUS_MANAGER_EVENT_REMOVE,
     CANOPUS_MANAGER_EVENT_CONFIRM,
     CANOPUS_MANAGER_EVENT_CANCEL,
     CANOPUS_MANAGER_EVENT_ACTIVATE,
+    CANOPUS_MANAGER_EVENT_SCAN,
+    CANOPUS_MANAGER_EVENT_OPEN_UI,
+    CANOPUS_MANAGER_EVENT_EXIT_SAFE_KEEP,
+    CANOPUS_MANAGER_EVENT_EXIT_SAFE_DISABLE,
     CANOPUS_MANAGER_EVENT_OPEN_MODULE_BASE = 0x100u,
 };
 
@@ -81,6 +85,9 @@ void canopus_manager_native_set_refresh(
     void *refresh_cookie);
 
 int32_t canopus_manager_native_render(struct canopus_manager_native_v1 *native);
+
+/* Refresh the visible device Manager after deferred module publication. */
+void canopus_manager_native_refresh(void);
 
 #ifdef __cplusplus
 }

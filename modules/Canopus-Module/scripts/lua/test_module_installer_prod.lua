@@ -24,10 +24,8 @@ local targets = {
     ['3.101.043'] = {'xiaomi-band-10-pro-3.101.043', '519307675665e4866d722a8119a98589c397b614ac3294cb87bfc86de45756ec'},
     ['4.100.139'] = {'xiaomi-band-11-4.100.139', '31ce82257f7c127950dc5070b86316730cf468a41f0d004559e41e7d923b2c74'},
     ['4.100.155'] = {'xiaomi-band-11-4.100.155', 'ea0bdf1920cb30223d616432af00565ca67622e6468328f5eab155f8cdc2fb9f'},
+    ['4.100.179'] = {'xiaomi-band-11-4.100.179', '307adabe0ff61c77be73d045a8260e279cddd131c7a535a2678eb34199278a2b'},
 }
-local pack = assert(io.open('targets/xiaomi-band-11-4.100.177/target.toml', 'r'))
-local metadata = pack:read('*a'); pack:close()
-targets['4.100.177'] = {'xiaomi-band-11-4.100.177', assert(metadata:match('firmware_sha256%s*=%s*"([^"]+)"'))}
 local function padded(s, n) return s .. string.rep('\0', n - #s) end
 local function rawhex(s) return (s:gsub('..', function(v) return string.char(tonumber(v,16)) end)) end
 local function run_case(version, fault)
@@ -62,8 +60,8 @@ local function run_case(version, fault)
     package.loaded.lvgl=lvgl
     local module = '\127ELF\1\1\1' .. string.rep('\0',9) .. string.pack('<I2I2',1,40) .. string.rep('\0',492)
     if target then
-        local receipt=string.pack('<I4I4I4I4I4I4I4I4',0x31494d43,1,256,0,1,1,#module,0)
-            .. padded(token,32) .. padded(target[1],48) .. rawhex(target[2]) .. string.rep('\0',112)
+        local receipt=string.pack('<I4I4I4I4I4I4I4I4',0x32494d43,2,176,0,1,1,#module,0)
+            .. padded(token,32) .. padded(target[1],48) .. rawhex(target[2]) .. string.rep('\0',32)
         if fault=='wrong_receipt' then receipt=receipt:sub(1,64)..padded('other-target',48)..receipt:sub(113) end
         if fault=='wrong_firmware' then receipt=receipt:sub(1,112)..string.rep('\0',32)..receipt:sub(145) end
         files['/fake/'..product..'-'..target[1]..'.bin']=module
@@ -97,17 +95,18 @@ local function run_case(version, fault)
             return {
                 write=function(self,data)
                     after_paint()
-                    if #data==16 then
-                        assert(not is_band11 and data==string.pack('<I4I4I4I4',0x43504331,0x43510001,0x43514431,0))
-                        reply=string.pack('<I4',0x43505331)..string.rep('\0',28)..string.pack('<i4',-7)..string.rep('\0',348)
+                    if #data==36 then
+                        -- CPC2 QUERY_DEVICE diagnostic (Band 10 Pro only)
+                        assert(not is_band11 and data==string.pack('<I4I2I2I2I2I4I4I4I4I4I4',0x43504332,36,1,2,0,36,9,0x7FFF,0,0,0))
+                        reply=string.pack('<I4I2I2I2I2I4I4I4I4I4I4',0x43504332,36,2,2,0,120,9,0x7FFF,0,5,84)..string.rep('\0',24)..string.pack('<i4',-7)..string.rep('\0',56)
                         return self
                     end
                     request=data
                     local id=fault=='stale_response' and 9 or 1
                     local result=fault=='rejected' and 3 or 5
                     reply=is_band11 and
-                        string.pack('<I4I2I2I2I2I4I4I4I4I4I4',0x43504332,36,2,1,0,40,2,id,0,result,4)..string.pack('<I4',7) or
-                        string.pack('<I4I2I2I2I2I4I4I4I4I4I4',0x43504332,36,2,1,0,36,2,id,0,result,0)
+                        string.pack('<I4I2I2I2I2I4I4I4I4I4I4',0x43504332,36,2,2,0,40,2,id,0,result,4)..string.pack('<I4',7) or
+                        string.pack('<I4I2I2I2I2I4I4I4I4I4I4',0x43504332,36,2,2,0,36,2,id,0,result,0)
                     if fault=='short_write' then return #data-1 end
                     return self
                 end,
@@ -162,7 +161,7 @@ local function run_case(version, fault)
         for path in pairs(files) do assert(not path:find('%.tmp$'),path) end
         assert(objects[4].text:find('安装完成',1,true),objects[4].text)
         assert(objects[4].text:find('查看和启用模块',1,true))
-        assert(files['/data/canopus/inbox/'..token..'.ko']==module)
+        assert(files['/data/canopus/inbox/'..token..'.ko.next']==module)
         for _,name in ipairs(assets) do assert(files['/data/canopus/'..name]==files['/fake/'..name]) end
     elseif fault=='cancel' then assert(request==nil and #commands==0)
     else

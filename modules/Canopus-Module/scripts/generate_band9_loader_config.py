@@ -25,12 +25,13 @@ def validate(profile: dict, target: dict) -> tuple[dict, dict, dict, dict, dict]
     if profile.get("firmware_sha256") != target.get("firmware_sha256"):
         raise SystemExit("loader profile firmware_sha256 does not match target.toml")
     loader_kind = target.get("loader")
-    if not isinstance(loader_kind, str) or not loader_kind.startswith(
-        "nsh-mw-stage1-stage2"
+    accepted_loaders = ("nsh-mw-stage1-stage2", "custom-staged-")
+    if not isinstance(loader_kind, str) or not loader_kind.startswith(accepted_loaders):
+        raise SystemExit("target.toml does not select a staged loader family")
+    if profile.get("loader_family") not in (
+        "nsh-mw-stage1-stage2", "staged-kmem-mpu", "lua-owned-stage1-stage2"
     ):
-        raise SystemExit("target.toml does not select the NSH/mw loader family")
-    if profile.get("loader_family") != "nsh-mw-stage1-stage2":
-        raise SystemExit("unsupported Band 9 loader family")
+        raise SystemExit("unsupported staged loader family")
 
     if profile.get("status") != "STATIC_RECOVERED":
         raise SystemExit(

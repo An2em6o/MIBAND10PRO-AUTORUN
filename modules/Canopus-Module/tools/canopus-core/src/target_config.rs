@@ -18,6 +18,33 @@ struct Mapping {
     address: Address,
 }
 
+const FW_UI_INPUT: &[Mapping] = &[
+    Mapping { macro_name: "FW_UI_EVENT_GET_INDEV", symbol_name: "lv_event_get_indev", address: Address::Callable },
+    Mapping { macro_name: "FW_UI_INDEV_GET_POINT", symbol_name: "lv_indev_get_point", address: Address::Callable },
+    Mapping { macro_name: "FW_UI_OBJECT_GET_COORDS", symbol_name: "lv_obj_get_coords", address: Address::Callable },
+    Mapping { macro_name: "FW_UI_OBJECT_GET_SCROLL_Y", symbol_name: "lv_obj_get_scroll_y", address: Address::Callable },
+    Mapping { macro_name: "FW_UI_OBJECT_GET_SCROLL_X", symbol_name: "lv_obj_get_scroll_x", address: Address::Callable },
+    Mapping { macro_name: "FW_UI_OBJECT_SCROLL_TO", symbol_name: "lv_obj_scroll_to", address: Address::Callable },
+    Mapping { macro_name: "FW_UI_TICK_GET", symbol_name: "lv_tick_get", address: Address::Callable },
+    Mapping { macro_name: "FW_UI_UPDATE_LAYOUT", symbol_name: "lv_obj_update_layout", address: Address::Callable },
+];
+
+const FW_UI_IMAGE_FIT: &[Mapping] = &[
+    Mapping { macro_name: "FW_UI_IMAGE_SCALE", symbol_name: "lvx_image_set_scale", address: Address::Callable },
+    Mapping { macro_name: "FW_UI_IMAGE_INFO", symbol_name: "lv_image_decoder_get_info", address: Address::Callable },
+];
+
+const FW_UI_FONT: &[Mapping] = &[
+    Mapping { macro_name: "FW_UI_FONT_CREATE", symbol_name: "native_font_create", address: Address::Callable },
+    Mapping { macro_name: "FW_UI_FONT_RELEASE", symbol_name: "native_font_release", address: Address::Callable },
+    Mapping { macro_name: "FW_UI_FONT_WAIT", symbol_name: "native_font_wait", address: Address::Callable },
+    Mapping { macro_name: "FW_UI_FONT_MANAGER_SLOT", symbol_name: "font_reload_uikit_slot", address: Address::Entry },
+    Mapping { macro_name: "FW_UI_FONT_DRAW_UNITS", symbol_name: "font_reload_draw_unit_slot", address: Address::Entry },
+    Mapping { macro_name: "FW_UI_FONT_DISPLAY_LIST", symbol_name: "font_reload_display_list", address: Address::Entry },
+    Mapping { macro_name: "FW_UI_FONT_VG_DISPATCH", symbol_name: "font_reload_vg_dispatch", address: Address::Callable },
+    Mapping { macro_name: "FW_UI_FONT_SW_DISPATCH", symbol_name: "font_reload_sw_dispatch", address: Address::Callable },
+];
+
 const FW_10: &[Mapping] = &[
     Mapping {
         macro_name: "FW_VERSION_ADDRESS",
@@ -90,6 +117,11 @@ const FW_10: &[Mapping] = &[
         address: Address::Callable,
     },
     Mapping {
+        macro_name: "FW_UI_STYLE_SET",
+        symbol_name: "lv_obj_set_local_style_prop",
+        address: Address::Callable,
+    },
+    Mapping {
         macro_name: "FW_LVX_STYLE_APPLY",
         symbol_name: "lvx_style_apply",
         address: Address::Callable,
@@ -97,6 +129,16 @@ const FW_10: &[Mapping] = &[
     Mapping {
         macro_name: "FW_STYLE_MISANS_DEMIBOLD_32",
         symbol_name: "style_misans_demibold_32",
+        address: Address::Entry,
+    },
+    Mapping {
+        macro_name: "FW_STYLE_MISANS_MEDIUM_24",
+        symbol_name: "style_misans_medium_24",
+        address: Address::Entry,
+    },
+    Mapping {
+        macro_name: "FW_STYLE_MISANS_MEDIUM_28",
+        symbol_name: "style_misans_medium_28",
         address: Address::Entry,
     },
     Mapping {
@@ -115,8 +157,13 @@ const FW_10: &[Mapping] = &[
         address: Address::Callable,
     },
     Mapping {
-        macro_name: "FW_LVX_SET_HIDDEN",
-        symbol_name: "lv_obj_set_hidden",
+        macro_name: "FW_LVX_OBJECT_ADD_FLAG",
+        symbol_name: "lvx_object_add_flag",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "FW_LVX_OBJECT_CLEAR_FLAG",
+        symbol_name: "lv_obj_clear_flag",
         address: Address::Callable,
     },
     Mapping {
@@ -375,6 +422,16 @@ const SUP_10: &[Mapping] = &[
         address: Address::Callable,
     },
     Mapping {
+        macro_name: "CANOPUS_SUP_NUTTX_RMDIR",
+        symbol_name: "rmdir",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_NUTTX_LSEEK",
+        symbol_name: "lseek",
+        address: Address::Callable,
+    },
+    Mapping {
         macro_name: "CANOPUS_SUP_INSMOD",
         symbol_name: "insmod",
         address: Address::Callable,
@@ -394,12 +451,175 @@ const SUP_10: &[Mapping] = &[
         symbol_name: "watchface_manager_delete_watchface",
         address: Address::Callable,
     },
+    // Optional: directory iteration for the phone-installed package scan.
+    Mapping {
+        macro_name: "CANOPUS_SUP_NUTTX_OPENDIR",
+        symbol_name: "opendir",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_NUTTX_READDIR",
+        symbol_name: "readdir",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_NUTTX_CLOSEDIR",
+        symbol_name: "closedir",
+        address: Address::Callable,
+    },
+    // Optional: back the MEM service (Supervisor-owned allocations only).
+    Mapping {
+        macro_name: "CANOPUS_SUP_HEAP_MALLOC",
+        symbol_name: "heap_malloc",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_HEAP_FREE",
+        symbol_name: "heap_free",
+        address: Address::Callable,
+    },
+    // Optional: the UI-owner heartbeat for service timers.
+    Mapping {
+        macro_name: "CANOPUS_SUP_LV_TIMER_CREATE",
+        symbol_name: "lv_timer_create",
+        address: Address::Callable,
+    },
+    // Optional: backs the TIME service (monotonic milliseconds).
+    Mapping {
+        macro_name: "CANOPUS_SUP_CLOCK_GETTIME",
+        symbol_name: "clock_gettime",
+        address: Address::Callable,
+    },
     // Optional: only packs that recovered the post-delete watchface refresh
     // emit this macro, so Supervisor code must guard on it.
     Mapping {
         macro_name: "CANOPUS_SUP_WATCHFACE_RESET",
         symbol_name: "watchface_reset_watchface",
         address: Address::Callable,
+    },
+    // Optional: stock hardware services behind the Supervisor platform hooks
+    // (battery, wake locks, screen/brightness, vibration, properties, Bluetooth
+    // adapter state). Each is guarded in Supervisor code; a missing symbol leaves
+    // the matching service group reporting UNSUPPORTED.
+    Mapping {
+        macro_name: "CANOPUS_SUP_PM_BATTERY_READY",
+        symbol_name: "power_battery_ready",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_PM_BATTERY_CHARGING",
+        symbol_name: "power_battery_charging",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_PM_BATTERY_LEVEL",
+        symbol_name: "power_battery_level",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_WAKELOCK_CREATE",
+        symbol_name: "wakelock_create",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_WAKELOCK_ACQUIRE",
+        symbol_name: "wakelock_acquire",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_WAKELOCK_RELEASE",
+        symbol_name: "wakelock_release",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_SCREEN_GET_STATE",
+        symbol_name: "screen_get_state",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_SCREEN_TURN_ON",
+        symbol_name: "screen_turn_on",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_SCREEN_SESSION_CREATE",
+        symbol_name: "screen_session_create",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_SCREEN_SESSION_START",
+        symbol_name: "screen_session_start",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_SCREEN_SESSION_STOP",
+        symbol_name: "screen_session_stop",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_SCREEN_SESSION_SET_AUTO_BRIGHTNESS",
+        symbol_name: "screen_session_set_auto_brightness",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_SCREEN_SESSION_SET_BRIGHTNESS_VALUE",
+        symbol_name: "screen_session_set_brightness_value",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_SCREEN_SESSION_RESTORE_DEFAULT",
+        symbol_name: "screen_session_restore_default",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_VIBRATOR_HAL_TRANSACT",
+        symbol_name: "vibrator_hal_transact",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_PROPERTY_GET",
+        symbol_name: "property_get",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_PROPERTY_GET_INT32",
+        symbol_name: "property_get_int32",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_BT_ADAPTER_GET_INSTANCE",
+        symbol_name: "bt_adapter_get_instance",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_BT_ADAPTER_GET_STATE",
+        symbol_name: "bt_adapter_get_state",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_NUTTX_MKDIR",
+        symbol_name: "mkdir",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_NUTTX_FSYNC",
+        symbol_name: "fsync",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_NUTTX_STAT",
+        symbol_name: "stat",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_SYSTEM_GET_STATE",
+        symbol_name: "system_get_state",
+        address: Address::Callable,
+    },
+    Mapping {
+        macro_name: "CANOPUS_SUP_SYSTEM_STATE",
+        symbol_name: "system_state",
+        address: Address::Entry,
     },
 ];
 const SUP_9: &[Mapping] = &[
@@ -488,22 +708,31 @@ impl<'a> TargetConfigGen<'a> {
     fn custom_loader(&self) -> bool {
         self.pack.loader != "nuttx-modlib-elf32-rel"
     }
+    fn static_test(&self) -> bool {
+        self.pack.static_test_abi == Some(true)
+    }
+    /// Production codegen needs an explicit approval. A static-test pack may
+    /// additionally expose restricted STATIC_RECOVERED records as address
+    /// constants for loader/ABI bring-up; that is still not an approval and
+    /// the generated header carries `CANOPUS_SUP_STATIC_TEST_ABI`.
+    fn codegen_available(&self, symbol: &Symbol) -> bool {
+        let production = symbol.policy != "restricted"
+            && symbol.policy != "forbidden"
+            && symbol.approved_for_codegen();
+        let static_test = self.static_test()
+            && symbol.status == "STATIC_RECOVERED"
+            && symbol.policy == "restricted";
+        production || static_test
+    }
     fn veneer_callable_available(&self, name: &str) -> bool {
-        self.symbol(name).is_some_and(|symbol| {
-            symbol.callable_address.is_some()
-                && symbol.policy != "restricted"
-                && symbol.policy != "forbidden"
-                && symbol.approved_for_codegen()
-        })
+        self.symbol(name)
+            .is_some_and(|symbol| symbol.callable_address.is_some() && self.codegen_available(symbol))
     }
     fn mapping_available(&self, map: Mapping) -> bool {
         let Some(symbol) = self.symbol(map.symbol_name) else {
             return false;
         };
-        self.address(map).is_some()
-            && symbol.policy != "restricted"
-            && symbol.policy != "forbidden"
-            && symbol.approved_for_codegen()
+        self.address(map).is_some() && self.codegen_available(symbol)
     }
     fn platform_complete(&self, custom: bool) -> bool {
         // Stock modlib targets retain their established production contract. The
@@ -541,12 +770,27 @@ impl<'a> TargetConfigGen<'a> {
         if custom {
             out.push_str("#define CANOPUS_SUP_CUSTOM_LOADER 1\n");
         }
+        if self.static_test() {
+            out.push_str("/* Static bring-up ABI only: restricted records are addresses,\n * not approvals. Do not ship this build as a production artifact. */\n#define CANOPUS_SUP_STATIC_TEST_ABI 1\n");
+        }
         out.push('\n');
         // A zero completeness flag must not accompany executable candidate
         // addresses: consumers other than the Supervisor build script can
         // include this header. Incomplete custom targets expose identity only.
         if complete {
             self.emit(&mut out, if custom { FW_9 } else { FW_10 }, false);
+            self.emit(&mut out, FW_UI_INPUT, false);
+            if self.pack.target_id == "xiaomi-band-10-pro-3.101.043" {
+                // Exact private image ABI: EVID-UI-1043-IMAGE-FIT-001.
+                self.emit(&mut out, FW_UI_IMAGE_FIT, false);
+                self.emit(&mut out, FW_UI_FONT, false);
+                out.push_str("#define FW_UI_FONT_EVENT_DELETE 36u\n");
+                // Exact private properties: EVID-UI-1043-LAYOUT-INPUT-001.
+                out.push_str("#define FW_UI_COORD_TYPE int32_t\n#define FW_UI_EVENT_PRESSED 1u\n#define FW_UI_EVENT_PRESSING 2u\n#define FW_UI_EVENT_PRESS_LOST 3u\n#define FW_UI_EVENT_LONG_PRESSED 5u\n#define FW_UI_EVENT_RELEASED 8u\n#define FW_UI_EVENT_SCROLL 12u\n#define FW_UI_STYLE_RADIUS 12u\n#define FW_UI_STYLE_CLIP_CORNER 45u\n#define FW_UI_IMAGE_CREATE_THEME_ARG 1\n");
+                out.push_str("/* Exact-target opacity: EVID-UI-1043-OPACITY-001; static only. */\n#define FW_UI_STYLE_OPA 95u\n");
+            } else if self.pack.target_id == "xiaomi-band-10-pro-3.101.036" {
+                out.push_str("/* Exact-target opacity and SRAM dispatcher: EVID-UI-1036-OPACITY-001; static only. */\n#define FW_UI_STYLE_OPA 95u\n");
+            }
             out.push('\n');
             self.emit(&mut out, if custom { SUP_9 } else { SUP_10 }, custom);
         } else {

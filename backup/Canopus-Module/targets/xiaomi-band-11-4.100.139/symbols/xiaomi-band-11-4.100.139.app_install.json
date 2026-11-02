@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "symbol_id": "xiaomi-band-11-4.100.139.app_install",
+  "target_id": "xiaomi-band-11-4.100.139",
+  "name": "app_install",
+  "kind": "function",
+  "entry_address": "0xc6ab350",
+  "callable_address": "0xc6ab351",
+  "instruction_set": "thumb",
+  "prototype": "int(launcher_app_descriptor *, firmware_page_descriptor *const *, uint32_t)",
+  "calling_convention": "arm-aapcs",
+  "contexts": {
+    "allowed": [
+      "app_registry_owner"
+    ],
+    "blocking": false
+  },
+  "ownership": {
+    "return_value": "implementation_defined"
+  },
+  "side_effects": [
+    "inserts_app_into_registry",
+    "allocates_descriptor_copy",
+    "allocates_page_registry",
+    "registers_each_page",
+    "emits_app_event_28"
+  ],
+  "proof": {
+    "static": "recovered",
+    "device": "not_probed",
+    "evidence_ids": [
+      "EVID-BLUETOOTH-4139-006"
+    ]
+  },
+  "policy": "restricted",
+  "status": "STATIC_RECOVERED",
+  "provenance": {
+    "firmware_sha256": "31ce82257f7c127950dc5070b86316730cf468a41f0d004559e41e7d923b2c74",
+    "evidence_ids": [
+      "EVID-BLUETOOTH-4139-006"
+    ],
+    "source": "Exact .139 IDA callsite/Thumb audit; typed semantic adapter in target-private. See evidence for scope."
+  },
+  "notes": "Private Band 11 runtime binding. ABI is adapted per target; public approval remains PENDING. Radio/physical display validation requires a device. See EVID-BLUETOOTH-4139-006.",
+  "approval_state": "PENDING"
+}

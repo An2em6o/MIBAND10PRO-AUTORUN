@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "symbol_id": "xiaomi-band-11-4.100.139.private_abi.bt_timer_cancel",
+  "target_id": "xiaomi-band-11-4.100.139",
+  "name": "bt_timer_cancel",
+  "kind": "function",
+  "instruction_set": "thumb",
+  "entry_address": "0xc863010",
+  "prototype": "void *(uint32_t)",
+  "calling_convention": "arm-aapcs",
+  "contexts": {
+    "allowed": [
+      "target-private"
+    ],
+    "blocking": true
+  },
+  "proof": {
+    "static": "recovered",
+    "device": "not_probed",
+    "evidence_ids": [
+      "EVID-FW-MATCH-ENSEMBLE-1043-4139",
+      "EVID-BLUETOOTH-4139-005"
+    ]
+  },
+  "policy": "restricted",
+  "status": "STATIC_RECOVERED",
+  "provenance": {
+    "firmware_sha256": "31ce82257f7c127950dc5070b86316730cf468a41f0d004559e41e7d923b2c74",
+    "evidence_ids": [
+      "EVID-FW-MATCH-ENSEMBLE-1043-4139",
+      "EVID-BLUETOOTH-4139-005"
+    ],
+    "source": "Exact .139 IDA decompilation and raw ARM tests; supersedes ensemble address 0xc46734c"
+  },
+  "approval_state": "PENDING",
+  "notes": "Takes handle VALUE, removes and frees timer record, cancels timer, RETURNS owned argument without freeing it. Caller must clear saved handle and release returned argument with matching allocator. Incompatible with .043 int(uint32_t *). 0C8632B0 is expiry dispatch, not cancellation. Not device-tested; no production callable or complete BluetoothAudio runtime is approved.",
+  "callable_address": "0xc863011"
+}

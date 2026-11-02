@@ -23,7 +23,6 @@
     "source": "bindiff-inspired-ensemble-v2 source=xiaomi-band-10-pro-3.101.036 report=targets/xiaomi-band-9-3.1.32/evidence/fw-match/ensemble-1036-to-9132-v2.json"
   },
   "entry_address": "0xc1489f8",
-  "callable_address": "0xc1489f9",
-  "notes": "Rejected after exact-IDB review: 0x0C1489F8 enters power/pm/pm_activity.c bookkeeping, not rmmod. The apparent rmmod strings in the image are unrelated rmmode UI identifiers.",
+  "notes": "Rejected after exact-IDB review: 0x0C1489F8 enters power/pm/pm_activity.c bookkeeping, not rmmod. The apparent rmmod strings in the image are unrelated rmmode UI identifiers. 2026-10-24 restored exact 3.1.32 records; earlier approval withdrawn, restricted/PENDING, device not probed. Loader is now Band-11-style staged, not the rejected NSH path.",
   "approval_state": "REJECTED"
 }

@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "evidence_id": "EVID-ID-001",
+  "target_id": "xiaomi-band-10-pro-3.101.036",
+  "question": "Are the firmware version/build strings at fixed addresses usable as a runtime identity guard?",
+  "candidate_symbols": [
+    "xiaomi-band-10-pro-3.101.036.identity.firmware_version_string",
+    "xiaomi-band-10-pro-3.101.036.identity.firmware_build_string"
+  ],
+  "prototype_hypothesis": "const char[] at 0x0C0C0810 (3.101.036) and 0x0C0C0850 (CONBINE_LTALM078_T3.101.036_06242053)",
+  "callsite_evidence": [
+    "The exact 3.101.036 IDB and firmware image contain 3.101.036 at 0x0C0C0810 and CONBINE_LTALM078_T3.101.036_06242053 at 0x0C0C0850.",
+    "The previous target metadata value ending in 06011854 was disproven on device when the module loaded but its constructor identity guard returned before /dev/canopus registration."
+  ],
+  "control_flow_evidence": [
+    "The supervisor constructor compares both fixed-address strings before supervisor initialization and register_driver.",
+    "The corrected 3.101.036 supervisor embeds 06242053 and passes the exact-target ELF verifier."
+  ],
+  "ownership_analysis": "read-only firmware strings; borrowed for module lifetime",
+  "unsafe_assumptions": [
+    "string comparison is not a full SHA-256 recompute; complete SHA remains the offline release constraint"
+  ],
+  "recommended_probe": "minimal fixed-address read of both strings in the module constructor",
+  "reviewers": [
+    "canopus-maintainer"
+  ],
+  "verdict": "DEVICE_PROBED",
+  "created": "2026-07-22T00:00:00Z",
+  "artifacts": [
+    {
+      "uri": "analysis/PHASE2_STOCK_ABI_FINDINGS.md",
+      "role": "findings-doc"
+    }
+  ]
+}

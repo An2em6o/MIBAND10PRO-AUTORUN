@@ -24,6 +24,6 @@
   },
   "entry_address": "0xc2013f4",
   "callable_address": "0xc2013f5",
-  "notes": "Promoted from ensemble v2 as a restricted address record; semantic contract and public callable approval remain pending.",
+  "notes": "Promoted from ensemble v2 as a restricted address record; semantic contract and public callable approval remain pending. 2026-10-24 restored exact 3.1.32 records; earlier approval withdrawn, restricted/PENDING, device not probed. Loader is now Band-11-style staged, not the rejected NSH path.",
   "approval_state": "PENDING"
 }

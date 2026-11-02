@@ -82,15 +82,17 @@ local function device_exchange(request, size)
     local f = io.open(ENDPOINT, "wb")
     check(f, SUPERVISOR_MISSING)
     local ok, result, message = pcall(f.write, f, request)
-    local closed, close_result = pcall(f.close, f)
-    check(ok and result and (type(result) ~= "number" or result == #request)
-        and closed and close_result, message or "Supervisor write failed")
+    -- A character device reports no close status; only the reply decides
+    -- whether the request landed.
+    pcall(f.close, f)
+    check(ok and result and (type(result) ~= "number" or result == #request),
+        message or "Supervisor write failed")
     f = io.open(ENDPOINT, "rb")
     check(f, "Cannot read supervisor response")
     local read_ok, response = pcall(f.read, f, size)
-    closed, close_result = pcall(f.close, f)
-    check(read_ok and type(response) == "string" and #response == size
-        and closed and close_result, "Invalid supervisor response")
+    pcall(f.close, f)
+    check(read_ok and type(response) == "string" and #response == size,
+        "Invalid supervisor response")
     return response
 end
 local function install()
@@ -98,13 +100,13 @@ local function install()
     local f = io.open(ENDPOINT, "rb")
     check(f, SUPERVISOR_MISSING)
     f:close()
-    checkpoint("读取目标模块与签名")
+    checkpoint("读取目标模块与回执")
     local stem = SCRIPT_PATH .. CONFIG.stem .. "-" .. target.id
     local receipt, module = read_all(stem .. ".cmi.bin"), read_all(stem .. ".bin")
-    checkpoint("校验固件、模块和签名配对")
-    check(type(receipt) == "string" and #receipt == 256
-        and u32(receipt, 0) == 0x31494D43 and u32(receipt, 4) == 1
-        and u32(receipt, 8) == 256 and fixed(receipt, 32, 32) == CONFIG.token
+    checkpoint("校验固件和模块配对")
+    check(type(receipt) == "string" and #receipt == 176
+        and u32(receipt, 0) == 0x32494D43 and u32(receipt, 4) == 2
+        and u32(receipt, 8) == 176 and fixed(receipt, 32, 32) == CONFIG.token
         and fixed(receipt, 64, 48) == target.id
         and hex(receipt:sub(113, 144)) == target.firmware,
         "Missing or invalid target receipt")
@@ -125,8 +127,8 @@ local function install()
     end
     prepare_inbox(checkpoint)
     local payloads = {
-        {"inbox/" .. CONFIG.token .. ".cmi", receipt},
-        {"inbox/" .. CONFIG.token .. ".ko", module},
+        {"inbox/" .. CONFIG.token .. ".cmi.next", receipt},
+        {"inbox/" .. CONFIG.token .. ".ko.next", module},
     }
     for _, asset in ipairs(assets) do payloads[#payloads + 1] = asset end
     for _, item in ipairs(payloads) do
@@ -139,17 +141,21 @@ local function install()
     checkpoint("提交签名验证与安装请求")
     local payload = CONFIG.token .. "\0"
     local request = string.pack("<I4I2I2I2I2I4I4I4I4I4I4",
-        0x43504332, 36, 1, 1, 0, 36 + #payload, 2, 1, 0, 0, #payload) .. payload
+        0x43504332, 36, 1, 2, 0, 36 + #payload, 2, 1, 0, 0, #payload) .. payload
     local response = device_exchange(request, REPLY_SIZE)
     check(u32(response, 0) == 0x43504332 and u16(response, 4) == 36
-        and u16(response, 6) == 2 and u16(response, 8) == 1
+        and u16(response, 6) == 2 and u16(response, 8) == 2
         and u32(response, 12) == REPLY_SIZE and u32(response, 16) == 2
         and u32(response, 20) == 1 and u32(response, 24) == 0
         and u32(response, 32) == REPLY_SIZE - 36, "Invalid supervisor response")
-    if u32(response, 28) ~= 5 then
-        local detail = "Supervisor result " .. u32(response, 28)
+    local result = u32(response, 28)
+    if result ~= 5 and result ~= 8 then
+        local detail = "Supervisor result " .. result
             .. failure_detail(response, device_exchange)
         error(detail, 0)
+    end
+    if result == 8 then
+        return "更新已提交，重启后生效。\n\n重启手环并重新运行 Canopus 安装表盘，新版本将自动切换；加载失败会自动回退到旧版本。"
     end
     return target.runtime_pending and
         "安装完成，模块保持禁用。\n\n本固件的音频运行适配尚未完成。\n\n可在管理器查看安装记录。" or

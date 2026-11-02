@@ -3,11 +3,12 @@ name = "canopus-package"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Builds and verifies .canopus module packages"
+rust-version.workspace = true
+repository.workspace = true
 
 [dependencies]
-canopus-core = { path = "../canopus-core" }
-ed25519-dalek = { version = "2", features = ["rand_core"] }
-getrandom = "0.2"
+canopus-core.workspace = true
 hex.workspace = true
 serde.workspace = true
 serde_json.workspace = true

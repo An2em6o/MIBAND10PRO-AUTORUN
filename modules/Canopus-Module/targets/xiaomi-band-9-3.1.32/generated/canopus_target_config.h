@@ -9,6 +9,9 @@
     "N66NFC_3.1.32"
 #define CANOPUS_SUP_PLATFORM_COMPLETE 1
 #define CANOPUS_SUP_CUSTOM_LOADER 1
+/* Static bring-up ABI only: restricted records are addresses,
+ * not approvals. Do not ship this build as a production artifact. */
+#define CANOPUS_SUP_STATIC_TEST_ABI 1
 
 #define FW_VERSION_ADDRESS UINT32_C(0x0C5FC5C1)
 #define FW_APP_LOOKUP UINT32_C(0x0C458CD9)

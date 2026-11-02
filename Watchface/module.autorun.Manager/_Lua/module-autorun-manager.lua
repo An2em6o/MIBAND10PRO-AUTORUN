@@ -86,6 +86,22 @@ local ON_GATE    = "echo on > " .. GATE           -- 放行（echo > 是 chaos �
 local SLEEP_PRE  = "sleep 8"                      -- 窗口 1：扣闸之后、跑模块之前
 local SLEEP_POST = "sleep 15"                     -- 窗口 2：全部跑完之后、放行之前
 
+-- 独立诊断账：不参与 ensure_gate，也不改变旧心跳/防砖语义。
+-- check 在 if 外；entered / start_* / return_* / finished 只在 if 内写。
+-- 每次到达生成区重置，区分「原本关着」与「进入后停在哪个模块」。
+local TRACE = { path = RC_DIR .. "/.autorun.trace" }
+function TRACE.line(event, reset)
+  return "echo " .. event .. (reset and " > " or " >> ") .. TRACE.path
+end
+function TRACE.owns(line)
+  if line == TRACE.line("check", true) then return true end
+  local event = line:match("^echo ([%w_%-]+) >> ")
+  return event ~= nil and line == TRACE.line(event)
+    and (event == "entered" or event == "finished"
+      or event:match("^start_[%w_%-]+$") ~= nil
+      or event:match("^return_[%w_%-]+$") ~= nil)
+end
+
 -- 配置文件：**就放在注册目录里**。快应用那条线整个去掉了 ——
 -- 不再需要"沙箱路径 / 兜底路径"两套落点，也不再有"这份编辑器看不见"那种半可用状态。
 -- **只有一个落点。**
@@ -823,7 +839,7 @@ local function split_others(cur)
   local mine = {}
   for i = 1, n do
     local t = lead(lines[i])
-    if isgen(t) or t == IF_LINE or t == HB_LINE or t == RM_GATE
+    if isgen(t) or TRACE.owns(t) or t == IF_LINE or t == HB_LINE or t == RM_GATE
       or t == CLEAR_LINE or t == ON_GATE
     then mine[i] = true end
   end
@@ -846,7 +862,7 @@ local function split_others(cur)
       elseif is_sleep and own_prev and nxt == CLEAR_LINE then
         mine[i] = true                                    -- 窗口 2（秒数可调 ⇒ 靠 cleared 认）
       elseif is_sleep and (prev == RM_GATE or isgen(prev) or own_prev)
-        and (isgen(nxt) or nxt_sleep) then
+        and (isgen(nxt) or nxt_sleep or (nxt ~= nil and TRACE.owns(nxt))) then
         mine[i] = true                                    -- 窗口 1 / 模块延迟（靠邻居认）
       end
     end
@@ -884,11 +900,15 @@ local function build_rc(list, others)
     end
   end
   if #tops + #run > 0 then
+    L[#L + 1] = TRACE.line("check", true)
     L[#L + 1] = HB_LINE
     L[#L + 1] = IF_LINE
     L[#L + 1] = RM_GATE                            -- 扣闸：跑不完就一直是关的
+    L[#L + 1] = TRACE.line("entered")
     for i = 1, #tops do
+      L[#L + 1] = TRACE.line("start_" .. tops[i].name)
       L[#L + 1] = GEN_LINE .. tops[i].name .. ".sh" -- 特权：扣完闸立刻跑，不等待
+      L[#L + 1] = TRACE.line("return_" .. tops[i].name)
     end
     if #run > 0 then
       L[#L + 1] = "sleep " .. CFG.pre                -- 窗口 1（秒数可调，默认 8）
@@ -896,12 +916,15 @@ local function build_rc(list, others)
         local d = math.floor(tonumber(run[i].delay) or 1)
         if d < 1 then d = 1 elseif d > 100 then d = 100 end
         L[#L + 1] = "sleep " .. d                  -- ★ 每个模块**自己**的那格延迟
+        L[#L + 1] = TRACE.line("start_" .. run[i].name)
         L[#L + 1] = GEN_LINE .. run[i].name .. ".sh"
+        L[#L + 1] = TRACE.line("return_" .. run[i].name)
       end
     end
     L[#L + 1] = "sleep " .. CFG.post                 -- 窗口 2（秒数可调，默认 15）
     L[#L + 1] = CLEAR_LINE                         -- 它的缺席 = 上次被打断的唯一证据
     L[#L + 1] = ON_GATE                            -- 放行：闸加回来
+    L[#L + 1] = TRACE.line("finished")
     L[#L + 1] = FI_LINE
   end
   return table.concat(L, "\n") .. "\n"
@@ -966,6 +989,19 @@ local function log_last()
     if #t > 0 then last = t end
   end
   return last
+end
+
+function TRACE.status()
+  local raw = read_all(TRACE.path, "r")
+  local last = type(raw) == "string" and raw:match("([^\r\n]+)[\r\n]*$") or nil
+  if last == "check" then return "链路: 最近只到闸前, 未见进入" end
+  if last == "entered" then return "链路: 最近已进入, 未到模块" end
+  if last == "finished" then return "链路: 最近已执行到放行" end
+  local name = last and last:match("^start_([%w_%-]+)$")
+  if name then return "链路: " .. name .. " 未见返回" end
+  name = last and last:match("^return_([%w_%-]+)$")
+  if name then return "链路: " .. name .. " 已返回, 未见收尾" end
+  return "链路: 暂无新版诊断记录"
 end
 
 -- 总开关缺了就补建（默认**开**）。返回 (开关在, 是不是刚建的)。
@@ -1121,6 +1157,7 @@ local function refresh_status(extra)
 end
 
 -- 重建 /data/rc：别人的行不动，只重建生成区。内容没变就不写盘（幂等）。
+-- 返回是否成功应用；总开关有意关闭不等于应用失败。
 -- ★ 每个出口都要 render_rows()：refresh_all 可能**自动补登记**了新切片，
 --   不重绘的话模块页会一直显示上一次的旧列表（"脚本都删了还写着允许"）。
 -- ★ 配置读写不正常（CFG_OK=false）时**一律拒绝**：这时候 MODS 是空壳，重建出来
@@ -1130,7 +1167,7 @@ local function do_rebuild()
   if not CFG_OK then
     log_append("拒绝应用: " .. CFG_PATH .. " 建不出来", 0xFF9A9A)
     refresh_status() render_rows()
-    return
+    return false
   end
   -- ★ 总开关文件不在就补建（默认开）；**用户显式关过**（GATE_OFF 凭据）或**闸已经被
   --   开机脚本扣住**（心跳日志末行 gate_off）都**不补** —— 后者是防砖的核心，
@@ -1140,8 +1177,8 @@ local function do_rebuild()
   local gok, made = ensure_gate()
   if made then log_append("总开关已补建(默认开): " .. GATE, 0x8FF0A4) end
   if not gok then
-    local why = (log_last() == "gate_off") and "上次开机没跑到底, 闸停在扣住状态"
-      or (exists(GATE_OFF) and "你关过" or "还没有过")
+    local why = exists(GATE_OFF) and "你关过"
+      or ((log_last() == "gate_off") and "gate_off: 可能原本关闭或启动中断" or "还没有过")
     log_append("注意: 总开关是关的(" .. why .. ") -> 这次应用出来的模块行不会跑", 0xFFD27A)
     log_append("-> 面板显示 未启动; 要开机自动跑, 请按 [3 开启]", 0xFFD27A)
   end
@@ -1161,7 +1198,7 @@ local function do_rebuild()
         (present == true and " (文件在, 怕抹掉别人的行)" or " (连 ls /data 都没判出来)"),
         0xFF9A9A)
       refresh_status() render_rows()
-      return
+      return false
     end
   end
   local others = split_others(cur)
@@ -1169,13 +1206,13 @@ local function do_rebuild()
   if cur == body then
     log_append("应用: 内容未变, 未写盘 (" .. #others .. " 行别人的)", 0x8FF0A4)
     refresh_status() render_rows()
-    return
+    return true
   end
   local ok, err = write_file(RC_PATH, body)
   if not ok then
     log_append("应用失败: " .. tostring(err), 0xFF9A9A)
     refresh_status() render_rows()
-    return
+    return false
   end
   local wrote = 0
   for _, m in ipairs(MODS) do if m.enable and m.present then wrote = wrote + 1 end end
@@ -1186,6 +1223,7 @@ local function do_rebuild()
   log_append(string.format("已应用 /data/rc: %d 行生成 + %d 行别人的", wrote, #others),
     0x8FF0A4)
   refresh_status() render_rows()
+  return true
 end
 
 -- 【已删除】sync_rc_auto（"打开表盘即对账"）
@@ -2271,10 +2309,11 @@ local function as_status_lines()
     or "开关: 总开关 关 -> 未启动, 按[3]开"
   -- ② 心跳：/data/rc 自己写的那本账（本页**只读**，见文件头）。
   --   "跑到底" = 全部模块跑完 + 窗口 2 过了 + 闸放回来了（末行 cleared）
-  --   "没跑到底" = 闸被扣住那一刻的痕迹还在（末行 gate_off）—— 被打断就是这个样子
+  --   gate_off 在 if 外写，不能单凭它断言模块运行过；进度看独立 trace。
   L[#L + 1] = (ll == "cleared") and "心跳: 上次开机 跑到底"
-    or ((ll == "gate_off") and "心跳: 上次开机 没跑到底 -> 闸被扣住"
+    or ((ll == "gate_off") and "心跳: gate_off (原本关闭或中断)"
       or "心跳: 没有记录 (还没开过机)")
+  L[#L + 1] = TRACE.status()
   -- ③ 是否安装：init rc = flash 里那句 `sh /data/rc`
   local gok, gwhy = flash_gate()
   if not gok then
@@ -2325,8 +2364,9 @@ local function do_init_install()
   local gok, gwhy = flash_gate()
   if not gok then
     armed = ""
+    bad = true
     log_append("安装: flash 那半停用 —— " .. gwhy, 0xFF9A9A)
-    log_append("-> 文件那半照样装; 但 hook 不装, 开机不会跑 /data/rc", 0xFFD27A)
+    log_append("-> 仅准备文件; 本次未安装/确认 hook, 不能保证开机执行 /data/rc", 0xFFD27A)
   elseif armed ~= "install" then
     local t, probe = flash_probe()
     log_append("init rc 探测: " .. tostring(probe), 0xFFD27A)
@@ -2353,7 +2393,8 @@ local function do_init_install()
   else
     log_append("init rc: 跳过 (门未过)", 0xFFD27A)
   end
-  if ensure_config() then
+  CFG_OK = ensure_config()
+  if CFG_OK then
     log_append("目录/配置: " .. RC_DIR .. " + " .. CFG_FILE .. " 就位", 0x8FF0A4)
   else
     log_append("目录/配置: 建不出来 " .. CFG_PATH, 0xFF9A9A)
@@ -2375,7 +2416,7 @@ local function do_init_install()
     bad = true
   end
   if CFG_OK then
-    do_rebuild()
+    if not do_rebuild() then bad = true end
   else
     log_append("-> 配置不可用, 不应用 /data/rc", 0xFF9A9A)
     bad = true
@@ -2383,7 +2424,7 @@ local function do_init_install()
   end
   -- ★ flash 那半刚动过 -> 面板上的「安装:」必须重读一次（这一下读 flash 值得）
   refresh_as_state()
-  log_append(bad and "安装: 完成 (有失败项, 看上面红行)" or "安装: 完成",
+  log_append(bad and "安装: 未完成 (有失败项, 看上面红行)" or "安装: 完成",
     bad and 0xFFD27A or 0x8FF0A4)
 end
 

@@ -4,7 +4,7 @@
   "module_id": "org.example.bad",
   "version": "0.1.0",
   "build_generation": 1,
-  "canopus_abi": "1",
+  "canopus_abi": "2",
   "lifecycle": "removable",
   "artifacts": [
     {
@@ -15,9 +15,5 @@
     }
   ],
   "target_pack_revision": 1,
-  "signature": {
-    "key_id": "dev-key-001",
-    "algorithm": "ed25519"
-  },
   "min_manager_version": "0.1.0"
 }

@@ -25,14 +25,19 @@
 #define UI_KEY_DETAIL_SECTION    200u
 #define UI_KEY_DETAIL_STATE      201u
 #define UI_KEY_DETAIL_CLASS      202u
-#define UI_KEY_DETAIL_SIGN       203u
 #define UI_KEY_DETAIL_ERROR      204u
-#define UI_KEY_DETAIL_UPDATE     210u
 #define UI_KEY_DETAIL_ROLLBACK   211u
+#define UI_KEY_SCAN              212u
+#define UI_KEY_SAFE_MODE          34u
+#define UI_KEY_EXIT_SAFE_KEEP     35u
+#define UI_KEY_EXIT_SAFE_DISABLE  36u
+#define UI_KEY_SAFE_SECTION       37u
+#define UI_KEY_SAFE_EXPLANATION   38u
 #define UI_KEY_DETAIL_ENABLE     212u
 #define UI_KEY_DETAIL_DISABLE    213u
 #define UI_KEY_DETAIL_REMOVE     214u
 #define UI_KEY_DETAIL_ACTIVATE   215u
+#define UI_KEY_DETAIL_OPEN_UI    216u
 #define UI_KEY_CONFIRM_SECTION   300u
 #define UI_KEY_CONFIRM_MESSAGE   301u
 #define UI_KEY_CONFIRM_ACCEPT    302u
@@ -227,33 +232,49 @@ static void format_diag_u32(uint32_t value, char out[16])
 static void format_operation_result(const struct canopus_manager_model_v1 *model,
                                     char out[48])
 {
-    const char *name = "unknown";
+    const char *name = "未知结果";
     uint32_t used = 0u;
     switch (model->pending_state) {
-    case CANOPUS_RESULT_REJECTED: name = "rejected"; break;
-    case CANOPUS_RESULT_FAILED: name = "failed"; break;
-    case CANOPUS_RESULT_DISALLOWED: name = "disallowed"; break;
+    case CANOPUS_RESULT_REJECTED: name = "操作被拒绝"; break;
+    case CANOPUS_RESULT_FAILED: name = "操作失败"; break;
+    case CANOPUS_RESULT_DISALLOWED: name = "操作未允许"; break;
     default: break;
     }
     out[0] = '\0';
-    used = append_string(out, used, 48u, name, 16u);
-    used = append_string(out, used, 48u, " (result ", 9u);
+    used = append_string(out, used, 48u, name, 24u);
+    used = append_string(out, used, 48u, " (状态码 ", sizeof(" (状态码 ") - 1u);
     used = append_u32(out, used, 48u, model->pending_state);
-    used = append_string(out, used, 48u, ")", 1u);
+    (void)append_string(out, used, 48u, ")", 1u);
 }
 
-static void format_module_detail(const struct canopus_manager_module_v1 *module,
+static const char *safe_mode_reason_name(uint32_t reason)
+{
+    switch (reason) {
+    case 1u: return "用户主动进入";
+    case 2u: return "模块连续启动失败";
+    case 3u: return "上次启动未完成";
+    case 4u: return "模块注册表损坏";
+    case 5u: return "框架协议不匹配";
+    default: return "原因未知";
+    }
+}
+
+static void format_module_detail(const struct canopus_manager_model_v1 *model,
+                                 const struct canopus_manager_module_v1 *module,
                                  char out[64])
 {
     uint32_t used = 0;
-    /* INSTALLED is the disabled-by-default state; say so explicitly so a
-     * freshly installed module is never mistaken for an enabled one. */
-    const char *state = module->state == CANOPUS_STATE_INSTALLED
-                            ? "已安装（已禁用）"
-                            : manager_state_name(module->state);
+    const char *state = model->safe_mode ? "安全模式，暂不加载" :
+        module->activation_error == -25 ? "因连续启动失败已停用" :
+        module->state == CANOPUS_STATE_INSTALLED ? "已安装（已禁用）" :
+        manager_state_name(module->state);
     out[0] = '\0';
-    used = append_string(out, used, 64u, state, 32u);
-    used = append_string(out, used, 64u, " / 版本 ", sizeof(" / 版本 ") - 1u);
+    if (module->activation_error == -22) {
+        used = append_string(out, used, 64u, "已自动回退到版本 ", sizeof("已自动回退到版本 ") - 1u);
+    } else {
+        used = append_string(out, used, 64u, state, 32u);
+        used = append_string(out, used, 64u, " / 版本 ", sizeof(" / 版本 ") - 1u);
+    }
     (void)append_u32(out, used, 64u, module->version);
 }
 
@@ -310,13 +331,36 @@ static int32_t render_device(struct canopus_manager_native_v1 *native,
     format_framework(model->framework_revision, framework);
     format_overview(model, modules);
 
+    if (model->safe_mode) {
+        rc = CANOPUS_UI_SECTION(tree, UI_KEY_SAFE_SECTION, "安全模式");
+        if (rc != CANOPUS_UI_OK) return rc;
+        rc = append_status(tree, UI_KEY_SAFE_MODE, "原因", sizeof("原因") - 1u,
+                           safe_mode_reason_name(model->safe_mode_reason), 32u);
+        if (rc != CANOPUS_UI_OK) return rc;
+        rc = append_text(tree, UI_KEY_SAFE_EXPLANATION,
+                         "模块仍已安装，本次暂不加载。",
+                         sizeof("模块仍已安装，本次暂不加载。") - 1u, 0u);
+        if (rc != CANOPUS_UI_OK) return rc;
+        rc = append_action(tree, UI_KEY_EXIT_SAFE_KEEP, "退出安全模式",
+                           sizeof("退出安全模式") - 1u,
+                           "重启后保持模块原状态试运行", sizeof("重启后保持模块原状态试运行") - 1u,
+                           CANOPUS_MANAGER_EVENT_EXIT_SAFE_KEEP, 1);
+        if (rc != CANOPUS_UI_OK) return rc;
+        rc = append_action(tree, UI_KEY_EXIT_SAFE_DISABLE, "退出并停用全部模块",
+                           sizeof("退出并停用全部模块") - 1u,
+                           "重启后不加载任何模块", sizeof("重启后不加载任何模块") - 1u,
+                           CANOPUS_MANAGER_EVENT_EXIT_SAFE_DISABLE, 1);
+        if (rc != CANOPUS_UI_OK) return rc;
+        rc = CANOPUS_UI_END(tree);
+        if (rc != CANOPUS_UI_OK) return rc;
+    }
     rc = CANOPUS_UI_SECTION(tree, UI_KEY_SYSTEM_SECTION, "系统信息");
     if (rc != CANOPUS_UI_OK) return rc;
     rc = append_status(tree, UI_KEY_FRAMEWORK, "框架", sizeof("框架") - 1u,
                        framework, sizeof(framework));
     if (rc != CANOPUS_UI_OK) return rc;
     rc = append_status(tree, UI_KEY_MANAGER, "管理器", sizeof("管理器") - 1u,
-                       "原生 UI ABI 1.4", sizeof("原生 UI ABI 1.4") - 1u);
+                       "原生 UI ABI 2.0", sizeof("原生 UI ABI 2.0") - 1u);
     if (rc != CANOPUS_UI_OK) return rc;
     rc = append_status(tree, UI_KEY_FIRMWARE, "固件", sizeof("固件") - 1u,
                        model->firmware_version, sizeof(model->firmware_version));
@@ -393,6 +437,11 @@ static int32_t render_device(struct canopus_manager_native_v1 *native,
                        sizeof("已验证待安装包") - 1u, CANOPUS_MANAGER_EVENT_INSTALL,
                        native->stage_token[0] != '\0' && !model->safe_mode);
     if (rc != CANOPUS_UI_OK) return rc;
+    rc = append_action(tree, UI_KEY_SCAN, "导入手机推送的模块",
+                       sizeof("导入手机推送的模块") - 1u,
+                       "新模块默认禁用，需手动启用", sizeof("新模块默认禁用，需手动启用") - 1u,
+                       CANOPUS_MANAGER_EVENT_SCAN, !model->safe_mode);
+    if (rc != CANOPUS_UI_OK) return rc;
     return CANOPUS_UI_END(tree);
 }
 
@@ -415,7 +464,7 @@ static int32_t render_module_list(struct canopus_manager_native_v1 *native,
         const char *label = module->module_id[0] ? module->module_id : "未命名模块";
         uint32_t label_cap = module->module_id[0] ? sizeof(module->module_id) : sizeof("未命名模块") - 1u;
         char detail[64];
-        format_module_detail(module, detail);
+        format_module_detail(model, module, detail);
         rc = append_action(tree, UI_KEY_MODULE_BASE + i, label, label_cap,
                            detail, sizeof(detail),
                            CANOPUS_MANAGER_EVENT_OPEN_MODULE_BASE + i, 1);
@@ -435,7 +484,7 @@ static int32_t render_module_detail(struct canopus_manager_native_v1 *native,
         return CANOPUS_UI_ERR_STATE;
     }
     module = &model->modules[model->selected];
-    format_module_detail(module, state);
+    format_module_detail(model, module, state);
 
     rc = CANOPUS_UI_SECTION(tree, UI_KEY_DETAIL_SECTION, "模块状态");
     if (rc != CANOPUS_UI_OK) return rc;
@@ -445,11 +494,8 @@ static int32_t render_module_detail(struct canopus_manager_native_v1 *native,
     rc = append_status(tree, UI_KEY_DETAIL_CLASS, "生命周期", sizeof("生命周期") - 1u,
                        lifecycle_name(module->lifecycle_class), 32u);
     if (rc != CANOPUS_UI_OK) return rc;
-    rc = append_status(tree, UI_KEY_DETAIL_SIGN, "签名", sizeof("签名") - 1u,
-                       module->signature_ok ? "已验证" : "未签名 / 开发版",
-                       21u);
-    if (rc != CANOPUS_UI_OK) return rc;
-    if (module->activation_error != 0) {
+    if (module->activation_error != 0 && module->activation_error != -22 &&
+        module->activation_error != -25) {
         char error[48];
         format_error(module->activation_error, error);
         rc = append_status(tree, UI_KEY_DETAIL_ERROR, "模块错误", sizeof("模块错误") - 1u,
@@ -457,6 +503,14 @@ static int32_t render_module_detail(struct canopus_manager_native_v1 *native,
         if (rc != CANOPUS_UI_OK) return rc;
     }
 
+    if (module->has_ui && module_is_active(module)) {
+        rc = append_action(tree, UI_KEY_DETAIL_OPEN_UI, "打开界面", sizeof("打开界面") - 1u,
+                           module->ui_label[0] != '\0' ? module->ui_label : "模块提供的页面",
+                           module->ui_label[0] != '\0' ? sizeof(module->ui_label)
+                                                        : sizeof("模块提供的页面") - 1u,
+                           CANOPUS_MANAGER_EVENT_OPEN_UI, 1);
+        if (rc != CANOPUS_UI_OK) return rc;
+    }
     if (canopus_manager_can_activate(model, model->selected)) {
         rc = append_action(tree, UI_KEY_DETAIL_ACTIVATE, "立即激活", sizeof("立即激活") - 1u,
                            "本次运行加载，需确认", sizeof("本次运行加载，需确认") - 1u,
@@ -469,15 +523,9 @@ static int32_t render_module_detail(struct canopus_manager_native_v1 *native,
                            CANOPUS_MANAGER_EVENT_ENABLE, 1);
         if (rc != CANOPUS_UI_OK) return rc;
     }
-    if (canopus_manager_can_update(model, model->selected)) {
-        rc = append_action(tree, UI_KEY_DETAIL_UPDATE, "更新", sizeof("更新") - 1u,
-                           "安装已验证的替代版本", sizeof("安装已验证的替代版本") - 1u,
-                           CANOPUS_MANAGER_EVENT_UPDATE, 1);
-        if (rc != CANOPUS_UI_OK) return rc;
-    }
     if (canopus_manager_can_rollback(model, model->selected)) {
         rc = append_action(tree, UI_KEY_DETAIL_ROLLBACK, "回滚", sizeof("回滚") - 1u,
-                           "恢复上一版本", sizeof("恢复上一版本") - 1u,
+                           "重启后恢复上一版本", sizeof("重启后恢复上一版本") - 1u,
                            CANOPUS_MANAGER_EVENT_ROLLBACK, 1);
         if (rc != CANOPUS_UI_OK) return rc;
     }
@@ -503,17 +551,23 @@ static const char *confirmation_message(uint32_t event_id)
     case CANOPUS_MANAGER_EVENT_ACTIVATE:
         return "立即运行模块？常驻模块需重启才能停用。";
     case CANOPUS_MANAGER_EVENT_INSTALL:
-        return "Install the verified staged package?";
+        return "确认安装已就绪的待安装包？";
+    case CANOPUS_MANAGER_EVENT_SCAN:
+        return "导入手机推送的新模块？导入后需手动启用。";
     case CANOPUS_MANAGER_EVENT_ENABLE:
-        return "Enable this module on next boot?";
+        return "在下次手环启动时启用该模块？";
     case CANOPUS_MANAGER_EVENT_DISABLE:
-        return "Disable this module after next reboot?";
+        return "在下次手环重启后停用该模块？";
     case CANOPUS_MANAGER_EVENT_ROLLBACK:
-        return "Restore the previous verified module version?";
+        return "恢复至该模块上一已验证版本？";
     case CANOPUS_MANAGER_EVENT_REMOVE:
-        return "Remove this module after reboot? Cannot be undone.";
+        return "重启后彻底删除此模块？此操作不可撤销。";
+    case CANOPUS_MANAGER_EVENT_EXIT_SAFE_KEEP:
+        return "重启后退出安全模式，并尝试恢复运行？";
+    case CANOPUS_MANAGER_EVENT_EXIT_SAFE_DISABLE:
+        return "重启后退出安全模式，并停用所有模块？";
     default:
-        return "Continue with this operation?";
+        return "确认继续执行此操作？";
     }
 }
 
@@ -522,17 +576,20 @@ static int32_t render_confirmation(struct canopus_manager_native_v1 *native,
 {
     const char *message = confirmation_message(native->confirm_event);
     int32_t rc;
-    rc = CANOPUS_UI_SECTION(tree, UI_KEY_CONFIRM_SECTION, "确认操作");
+    /* A dialog: the message, then the buttons in message-box order (cancel,
+     * confirm). Where the backend has no message box they are ordinary rows. */
+    rc = CANOPUS_UI_COMPONENT(tree, UI_KEY_CONFIRM_SECTION, CANOPUS_UI_NODE_DIALOG,
+                              "确认操作", "", 0u, CANOPUS_UI_NODE_FLAG_VISIBLE);
     if (rc != CANOPUS_UI_OK) return rc;
-    rc = append_text(tree, UI_KEY_CONFIRM_MESSAGE, message, 64u, 2u);
-    if (rc != CANOPUS_UI_OK) return rc;
-    rc = append_action(tree, UI_KEY_CONFIRM_ACCEPT, "确认", sizeof("确认") - 1u,
-                       "应用此操作", sizeof("应用此操作") - 1u,
-                       CANOPUS_MANAGER_EVENT_CONFIRM, 1);
+    rc = append_text(tree, UI_KEY_CONFIRM_MESSAGE, message, 128u, 2u);
     if (rc != CANOPUS_UI_OK) return rc;
     rc = append_action(tree, UI_KEY_CONFIRM_CANCEL, "取消", sizeof("取消") - 1u,
                        "返回且不更改", sizeof("返回且不更改") - 1u,
                        CANOPUS_MANAGER_EVENT_CANCEL, 1);
+    if (rc != CANOPUS_UI_OK) return rc;
+    rc = append_action(tree, UI_KEY_CONFIRM_ACCEPT, "确认", sizeof("确认") - 1u,
+                       "应用此操作", sizeof("应用此操作") - 1u,
+                       CANOPUS_MANAGER_EVENT_CONFIRM, 1);
     if (rc != CANOPUS_UI_OK) return rc;
     return CANOPUS_UI_END(tree);
 }
@@ -614,16 +671,20 @@ static uint32_t execute_event(struct canopus_manager_native_v1 *native,
     case CANOPUS_MANAGER_EVENT_INSTALL:
         if (native->stage_token[0] == '\0') return CANOPUS_RESULT_DISALLOWED;
         return canopus_manager_op_install(model, native->stage_token);
+    case CANOPUS_MANAGER_EVENT_SCAN:
+        return canopus_manager_op_scan(model);
     case CANOPUS_MANAGER_EVENT_ENABLE:
         return canopus_manager_op_enable(model, model->selected);
     case CANOPUS_MANAGER_EVENT_DISABLE:
         return canopus_manager_op_disable(model, model->selected);
-    case CANOPUS_MANAGER_EVENT_UPDATE:
-        return canopus_manager_op_update(model, model->selected);
     case CANOPUS_MANAGER_EVENT_ROLLBACK:
         return canopus_manager_op_rollback(model, model->selected);
     case CANOPUS_MANAGER_EVENT_REMOVE:
         return canopus_manager_op_remove(model, model->selected);
+    case CANOPUS_MANAGER_EVENT_EXIT_SAFE_KEEP:
+        return canopus_manager_op_exit_safe_mode(model, 0u);
+    case CANOPUS_MANAGER_EVENT_EXIT_SAFE_DISABLE:
+        return canopus_manager_op_exit_safe_mode(model, 1u);
     default:
         return CANOPUS_RESULT_FAILED;
     }
@@ -633,10 +694,13 @@ static int event_needs_confirmation(uint32_t event_id)
 {
     return event_id == CANOPUS_MANAGER_EVENT_ACTIVATE ||
            event_id == CANOPUS_MANAGER_EVENT_INSTALL ||
+           event_id == CANOPUS_MANAGER_EVENT_SCAN ||
            event_id == CANOPUS_MANAGER_EVENT_ENABLE ||
            event_id == CANOPUS_MANAGER_EVENT_DISABLE ||
            event_id == CANOPUS_MANAGER_EVENT_ROLLBACK ||
-           event_id == CANOPUS_MANAGER_EVENT_REMOVE;
+           event_id == CANOPUS_MANAGER_EVENT_REMOVE ||
+           event_id == CANOPUS_MANAGER_EVENT_EXIT_SAFE_KEEP ||
+           event_id == CANOPUS_MANAGER_EVENT_EXIT_SAFE_DISABLE;
 }
 
 static int32_t refresh_model(struct canopus_manager_native_v1 *native)
@@ -659,15 +723,18 @@ static int32_t route_or_render(struct canopus_manager_native_v1 *native,
     return canopus_manager_native_render(native);
 }
 
-static int32_t manager_event(void *cookie, uint32_t generation,
-                             canopus_ui_node_id key, uint32_t event_id)
+static int32_t manager_event(void *cookie,
+                             const struct canopus_ui_event_v1 *event)
 {
     struct canopus_manager_native_v1 *native =
         (struct canopus_manager_native_v1 *)cookie;
     struct canopus_manager_model_v1 *model;
     uint32_t index;
-    (void)generation;
-    (void)key;
+    uint32_t event_id;
+    if (event == 0) return CANOPUS_UI_ERR_ARGUMENT;
+    if (event->type != CANOPUS_UI_EVENT_ACTIVATE &&
+        event->type != CANOPUS_UI_EVENT_VALUE_CHANGED) return CANOPUS_UI_OK;
+    event_id = event->event_id;
     if (native == 0 || native->model == 0) {
         return CANOPUS_UI_ERR_ARGUMENT;
     }
@@ -693,6 +760,12 @@ static int32_t manager_event(void *cookie, uint32_t generation,
         if (canopus_manager_goto(model, CANOPUS_MANAGER_VIEW_MODULE_LIST, 0) != 0)
             return CANOPUS_UI_ERR_STATE;
         return route_or_render(native, CANOPUS_MANAGER_ROUTE_MODULES);
+    case CANOPUS_MANAGER_EVENT_OPEN_UI:
+        if (model->selected >= model->module_count ||
+            !model->modules[model->selected].has_ui) {
+            return CANOPUS_UI_ERR_STATE;
+        }
+        return route_or_render(native, CANOPUS_MANAGER_ROUTE_MODULE_UI);
     case CANOPUS_MANAGER_EVENT_CANCEL:
         if (native->confirm_event == 0u) return CANOPUS_UI_ERR_STATE;
         native->confirm_event = 0u;
@@ -716,16 +789,15 @@ static int32_t manager_event(void *cookie, uint32_t generation,
         if (native->stage_token[0] == '\0') return CANOPUS_UI_ERR_DISABLED;
         /* fall through */
     case CANOPUS_MANAGER_EVENT_ACTIVATE:
+    case CANOPUS_MANAGER_EVENT_SCAN:
     case CANOPUS_MANAGER_EVENT_ENABLE:
     case CANOPUS_MANAGER_EVENT_DISABLE:
     case CANOPUS_MANAGER_EVENT_ROLLBACK:
     case CANOPUS_MANAGER_EVENT_REMOVE:
+    case CANOPUS_MANAGER_EVENT_EXIT_SAFE_KEEP:
+    case CANOPUS_MANAGER_EVENT_EXIT_SAFE_DISABLE:
         native->confirm_return_view = model->view;
         native->confirm_event = event_id;
-        return canopus_manager_native_render(native);
-    case CANOPUS_MANAGER_EVENT_UPDATE:
-        (void)execute_event(native, event_id);
-        (void)refresh_model(native);
         return canopus_manager_native_render(native);
     default:
         if (!event_needs_confirmation(event_id)) {

@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "symbol_id": "xiaomi-band-10-pro-3.101.043.bt_socket_server_receive",
+  "target_id": "xiaomi-band-10-pro-3.101.043",
+  "name": "bt_socket_server_receive",
+  "kind": "function",
+  "instruction_set": "thumb",
+  "prototype": "internal event-source/revents/server-state callback",
+  "proof": {
+    "static": "confirmed",
+    "device": "not_probed",
+    "evidence_ids": [
+      "EVID-BT-1043-MISC-001"
+    ]
+  },
+  "policy": "forbidden",
+  "status": "FORBIDDEN",
+  "provenance": {
+    "firmware_sha256": "519307675665e4866d722a8119a98589c397b614ac3294cb87bfc86de45756ec",
+    "source": "exact 3.101.043 IDB vela_ap.bin.i64; direct bt_socket_server_receive string, source path, recv/errno flow, and framed-message dispatch",
+    "evidence_ids": [
+      "EVID-BT-1043-MISC-001"
+    ]
+  },
+  "entry_address": "0xc3aeb08",
+  "callable_address": "0xc3aeb09",
+  "notes": "Exact internal socket event-loop handler; not a supported SDK transport receive function and must not be invoked directly.",
+  "approval_state": "REJECTED"
+}

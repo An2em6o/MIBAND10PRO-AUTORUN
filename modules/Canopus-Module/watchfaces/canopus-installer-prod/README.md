@@ -20,6 +20,11 @@ All three variants use this workflow:
 4. **Clear Env** requires two clicks and removes `/data/canopus` only after the
    explicit confirmation.
 
+On Band 10 Pro and Band 11, Run also leaves what a pinned start reads in `/data/canopus/`
+(including `stage1.bin`, `stage2.bin`, `supervisor.elf`, `boot.lua`, `b`, `boot.target`).
+Pinning itself is done from the AstroBox Canopus page (ADR-CAN-012), never from the watchface;
+the watchface has no Auto-run switch any more.
+
 Build all packaged targets with:
 
 ```sh
@@ -34,3 +39,16 @@ Generated `.bin` resources, including the production icon copies, are ignored
 by Git. Run the build above before packaging a fresh checkout. The source icon
 is tracked at `watchfaces/canopus-installer/manager_icon.bin`; loader resources
 are regenerated from the target profiles and source code.
+
+Encrypted Canopus L2 communication is included automatically for Band 10 Pro
+`.043` and Band 11 `.155`. No separate enable flag is needed. For example, build
+the Band 11 `.155` installer before packaging:
+
+```sh
+CANOPUS_TARGET=xiaomi-band-11-4.100.155 sh scripts/build_canopus_supervisor.sh
+```
+
+Then package the matching family directory, reboot the band and click **Run**.
+See the [Band 11 backend and activation notes](xiaomi-band-11/docs/README.md).
+Other firmware targets without an implemented L2 backend report that limitation
+at build time. Build defaults do not change private-symbol or device-approval status.

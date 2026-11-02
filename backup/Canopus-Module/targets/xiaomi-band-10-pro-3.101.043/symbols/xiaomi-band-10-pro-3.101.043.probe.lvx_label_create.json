@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "symbol_id": "xiaomi-band-10-pro-3.101.043.lvx_label_create",
+  "target_id": "xiaomi-band-10-pro-3.101.043",
+  "name": "lvx_label_create",
+  "kind": "function",
+  "instruction_set": "thumb",
+  "entry_address": "0xc588f30",
+  "callable_address": "0xc588f31",
+  "prototype": "void *(void *parent)",
+  "calling_convention": "arm-aapcs",
+  "contexts": {
+    "allowed": [
+      "native_manager_owner"
+    ],
+    "blocking": false
+  },
+  "ownership": {
+    "argument": "borrows a live LVGL parent object",
+    "return_value": "returns a child label owned by the LVGL object tree"
+  },
+  "proof": {
+    "static": "confirmed",
+    "device": "not_probed",
+    "host_tested": false,
+    "evidence_ids": [
+      "EVID-UI-WIDGET-001",
+      "EVID-FW-MATCH-ENSEMBLE-1036-1043"
+    ]
+  },
+  "policy": "native-full-trust",
+  "status": "STATIC_RECOVERED",
+  "provenance": {
+    "firmware_sha256": "519307675665e4866d722a8119a98589c397b614ac3294cb87bfc86de45756ec",
+    "evidence_ids": [
+      "EVID-UI-WIDGET-001",
+      "EVID-FW-MATCH-ENSEMBLE-1036-1043"
+    ],
+    "source": "exact 3.101.043 IDB stock callsites sub_C4C3804 and sub_C56D5B0"
+  },
+  "approval_state": "APPROVED",
+  "notes": "Stock callers pass a live parent in R0, call sub_C588F30, and retain returned R0 as the new label. The former corpus candidate sub_C588BF8 is instead called on an existing label with an integer property argument. Address refreshed by trusted-036 caller-neighborhood ensemble v2; semantic policy retained from the curated 043 record. Address refreshed by trusted-036 caller-neighborhood ensemble v2; semantic policy retained from the curated 043 record."
+}

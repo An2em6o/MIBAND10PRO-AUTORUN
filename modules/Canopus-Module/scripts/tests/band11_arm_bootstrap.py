@@ -6,6 +6,13 @@ PIC rebasing, relocation, AAPCS return paths, ctor mailbox and /dev registration
 it cannot validate physical BES cache/alias behavior or a real display.
 Run with build/band11-tests/bin/python scripts/tests/band11_arm_bootstrap.py.
 """
+import sys as _sys
+import sys as _s, pathlib as _p
+_s.path.insert(0, str(_p.Path(__file__).resolve().parent))
+import cpc2
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
+import fwlocate
 import ctypes
 import json
 from pathlib import Path
@@ -22,8 +29,7 @@ RES = ROOT / 'watchfaces/canopus-installer-prod/xiaomi-band-11'
 class Machine:
     def __init__(self, fault=None, code=0x1c400020, kernel_base=0x20110000, target=TARGET):
         self.target = target
-        self.firmware_path = ROOT / "fwbins" / target / "vela_ap.bin"
-        self.mpu_bitmap = 0x200f4080 if target == "xiaomi-band-11-4.100.177" else 0x200f5190
+        self.firmware_path = fwlocate.locate(target) or ROOT / "fwbins" / target / "vela_ap.bin"
         self.res = RES
         self.firmware_map = {}
         self.firmware_data_map = {}
@@ -32,6 +38,8 @@ class Machine:
             self.firmware_map = {int(a, 16): int(b, 16) for a, b in audit['addresses'].items()}
             self.firmware_data_map = {int(a, 16): int(b, 16)
                                       for a, b in audit.get('data_addresses', {}).items()}
+        # The .139/.155 harness numbers are the identity map; a later build lists its moves.
+        self.mpu_bitmap = self.fw_data(0x200f5190)
         # Comma-separated so a matrix can combine, e.g. an unavailable alias
         # with an MPU rejection that only the Kmem fallback can hit.
         self.fault = fault
@@ -99,14 +107,14 @@ class Machine:
         self.word(0x3c356b40+0x20,0x3cfefdf8)
         self.word(0x200e0000,2)
         self.register_calls = 0
-        self.app = 0; self.pages = []; self.launcher = []; self.widgets = {}; self.next_widget = 0x200a0000
+        self.app = 0; self.pages = []; self.launcher = []; self.module_apps = {}; self.widgets = {}; self.next_widget = 0x200a0000
         self.notifications = []
         hooks = {0x0c8f2bb0:self.notification_insert,
                  0x0c3507e8:self.allocate,0x0c34ccb8:self.free,
                  0x0c34cd2c:self.free,0x0c34f0a0:self.mallinfo,
                  0x0c342c54:self.open,0x0c33818c:self.close,0x0c33d784:self.read,
                  0x0c914f64:self.register,0x0c349538:lambda:0x200e0000,
-                 0x0c33dc4e:self.write,0x0c33dbec:self.unlink,0x0c33d79c:self.rename,0x0c6ac54c:lambda:self.app,
+                 0x0c33dc4e:self.write,0x0c33dbec:self.unlink,0x0c33d79c:self.rename,0x0c6ac54c:self.app_lookup,
                  0x0c6ab350:self.app_install,0x0c547b54:self.launcher_add}
         for addr in [0xc380686,0xc3ab300,0xc89e7dc,0xc3ae1d0,0xc3ad7f4]:hooks[addr]=self.widget_create
         for addr in [0xc387ba8,0xc387b2e,0xc3b3f5c,0xc38404c,0xc3840d8,0xc3877b0,0xc37fc1c,0xc3b2c28,0xc3ad920,0xc3ad8b4]:hooks[addr]=lambda:0
@@ -115,6 +123,15 @@ class Machine:
         for addr,fn in hooks.items():
             actual = self.fw(addr)
             self.firmware_hooks[addr] = u.hook_add(UC_HOOK_CODE,self.firmware_call,fn,actual,actual)
+        # A target with an owner pump (an L2 backend has one) creates its bootstrap timer in
+        # the ctor. The firmware timer list is not initialised in this model, so only the
+        # creation call is answered with a handle (it is a real-firmware address).
+        for evidence in ('l2-sram-probe.json', 'owner-pump.json'):
+            probe = ROOT / 'targets' / target / 'evidence' / evidence
+            if probe.exists():
+                timer = int(json.loads(probe.read_text())['addresses']['TIMER'], 16) & ~1
+                self.firmware_hooks[timer] = u.hook_add(UC_HOOK_CODE,self.firmware_call,lambda:0x20009000,timer,timer)
+                break
         u.hook_add(UC_HOOK_CODE,lambda uc,a,s,d:uc.emu_stop(),None,self.stop,self.stop)
         u.hook_add(UC_HOOK_MEM_WRITE,self.mpu_write,None,0xe000ed98,0xe000eda3)
         u.hook_add(UC_HOOK_MEM_READ,self.mpu_read,None,0xe000ed9c,0xe000eda3)
@@ -150,7 +167,7 @@ class Machine:
         """
         if self.target == TARGET:
             return address
-        if self.target == 'xiaomi-band-11-4.100.177' or self.firmware_data_map:
+        if self.firmware_data_map:
             return self.firmware_data_map[address]
         return address
     def hurt(self,name): return name in self.faults
@@ -275,9 +292,21 @@ class Machine:
         return 0xdeadc0de
     def app_install(self):
         ptr,pages,count=self.reg(0),self.reg(1),self.reg(2)
-        assert count==3 and self.string(self.word(ptr+12))=='com.canopus.manager'
+        package=self.string(self.word(ptr+12))
+        app_id=self.word(ptr+20)&0xffff
+        if package!='com.canopus.manager':
+            # a module's launcher entry: one page that opens the module's ui page
+            assert count==1 and package.startswith('com.canopus.module.') and app_id>=0xcc
+            page=self.word(pages)
+            assert self.word(page+20)==(app_id<<16) and self.word(ptr+36)&1
+            for off in (0x34,0x4c,0x50,0x5c,0x64):assert self.word(page+off)&1
+            self.module_apps[app_id]={'package':package,'icon':self.string(self.word(ptr+16)),
+                                      'label_callback':self.word(ptr+36),'page':page}
+            self.uc.mem_write(ptr+23,b'\x01\x01')
+            return 0
+        assert count==4
         assert self.string(self.word(ptr+16))=='/data/canopus/manager_icon.bin'
-        assert self.word(ptr+20)&0xffff==0xca and self.word(ptr+36)&1
+        assert app_id==0xca and self.word(ptr+36)&1
         self.pages=[self.word(pages+4*i) for i in range(count)]
         for i,page in enumerate(self.pages):
             assert self.word(page+20)==0x00ca0000+i
@@ -286,9 +315,13 @@ class Machine:
         self.app=0x200c0000;self.uc.mem_write(self.app,bytes(self.uc.mem_read(ptr,80)))
         self.uc.mem_write(ptr+23,b'\x01\x01') # firmware defaults mutate input
         return 0
+    def app_lookup(self):
+        app_id=self.reg(0)
+        return self.app if app_id==0xca else (0x200c1000+app_id if app_id in self.module_apps else 0)
     def launcher_add(self):
-        assert self.reg(0)==0xca and self.app
-        self.launcher.append(0xca);return 0
+        app_id=self.reg(0)
+        assert (app_id==0xca and self.app) or app_id in self.module_apps
+        self.launcher.append(app_id);return 0
     def widget_create(self):
         p=self.next_widget;self.next_widget+=0x80;self.widgets[p]={'parent':self.reg(0)};return p
     def widget_text(self):
@@ -398,9 +431,19 @@ class BootstrapTests(unittest.TestCase):
             self.assertEqual(m.peak_kernel,0,'the bootstrap drew on Kmem')
             self.assertEqual(sum(p not in m.frees for p in m.allocations),1)
             buffer=0x200d0000
-            m.uc.reg_write(UC_ARM_REG_R1,buffer);m.uc.reg_write(UC_ARM_REG_R2,384)
-            self.assertEqual(m.call(m.word(m.fops+8)),384)
-            self.assertEqual(m.word(buffer),0x43505331)
+            # CPC2 is the only device protocol: nothing can be read before a
+            # request was written, and an INSTALL request for an unknown token
+            # is answered by one header-only CPC2 response (result FAILED).
+            m.uc.reg_write(UC_ARM_REG_R1,buffer);m.uc.reg_write(UC_ARM_REG_R2,64)
+            self.assertEqual(m.call(m.word(m.fops+8)),0xffffffff)
+            request=cpc2.frame(2,b'nosuch\0')
+            m.uc.mem_write(buffer,request)
+            m.uc.reg_write(UC_ARM_REG_R1,buffer);m.uc.reg_write(UC_ARM_REG_R2,len(request))
+            self.assertEqual(m.call(m.word(m.fops+12)),len(request))
+            m.uc.reg_write(UC_ARM_REG_R1,buffer);m.uc.reg_write(UC_ARM_REG_R2,64)
+            self.assertEqual(m.call(m.word(m.fops+8)),36)
+            self.assertEqual(m.word(buffer),0x43504332)
+            self.assertEqual(m.word(buffer+28),6)
     def test_install_registers_launcher_and_renders_manager(self):
         m=Machine();self.assertEqual(m.boot(),0)
         # ITT-NE in client_exchange triggers a Unicorn 2.1.4 memory-hook defect.
@@ -410,12 +453,13 @@ class BootstrapTests(unittest.TestCase):
         ui = NativeUI(m)
         frame=0x200d0000
         for command,arg0 in [(0x4351000a,0),(0x43510002,0),(0x43510002,1),(0x43510002,2)]:
-            m.uc.mem_write(frame,struct.pack('<4I',0x43504331,command,arg0,0))
-            m.uc.reg_write(UC_ARM_REG_R1,frame);m.uc.reg_write(UC_ARM_REG_R2,16)
-            self.assertEqual(m.call(m.word(m.fops+12)),16)
+            _req = cpc2.legacy(command, arg0)
+            m.uc.mem_write(frame, _req)
+            m.uc.reg_write(UC_ARM_REG_R1,frame);m.uc.reg_write(UC_ARM_REG_R2,len(_req))
+            self.assertEqual(m.call(m.word(m.fops+12)), len(_req))
         self.assertEqual(m.launcher,[0xca])
         self.assertEqual(len(m.notifications), 1)
-        self.assertEqual(m.notifications[0]['body'], 'Canopus 已加载！尽情享受吧～')
+        self.assertEqual(m.notifications[0]['body'], 'Canopus 已加载，管理器可用。')
         self.assertEqual(m.notifications[0]['reminder'], 1)
         page=m.pages[0]
         m.uc.reg_write(UC_ARM_REG_R1,0x200b0000);m.uc.reg_write(UC_ARM_REG_R2,0)

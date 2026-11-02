@@ -7,7 +7,7 @@
 use canopus_core::model::{AddressRange, TargetPack};
 use object::{
     Architecture, BinaryFormat, Object, ObjectKind, ObjectSection, ObjectSymbol, RelocationFlags,
-    RelocationTarget, SectionFlags, SectionKind, SymbolKind, SymbolSection,
+    RelocationTarget, SectionFlags, SectionKind, SymbolSection,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -33,6 +33,8 @@ pub struct Summary {
     pub constructor_count: usize,
     pub destructor_count: usize,
     pub absolute_address_hits: usize,
+    /// Bytes the loader allocates: the sizes of all SHF_ALLOC sections, .bss included.
+    pub resident_bytes: u64,
 }
 
 /// Sections that are never allowed in a Canopus module.
@@ -106,51 +108,6 @@ impl<'a> Verifier<'a> {
 
         let profile = self.target.loader_profile.as_ref();
 
-        if profile.is_some_and(|p| p.constructor_discovery == "module_initialize") {
-            let entry = file.entry();
-            if entry == 0 {
-                report.errors.push(
-                    "ELF entrypoint is zero; target loader requires a module_initialize entrypoint"
-                        .into(),
-                );
-            } else {
-                let entry_is_executable_function = file.symbols().any(|symbol| {
-                    if symbol.address() != entry
-                        || symbol.kind() != SymbolKind::Text
-                        || symbol.is_undefined()
-                    {
-                        return false;
-                    }
-                    let Some(section_index) = symbol.section_index() else {
-                        return false;
-                    };
-                    let Ok(section) = file.section_by_index(section_index) else {
-                        return false;
-                    };
-                    match section.flags() {
-                        SectionFlags::Elf { sh_flags } => sh_flags & 0x4 != 0,
-                        _ => section.kind() == SectionKind::Text,
-                    }
-                });
-                if !entry_is_executable_function {
-                    report.errors.push(format!(
-                        "ELF entrypoint 0x{entry:x} does not resolve to a defined executable function symbol"
-                    ));
-                }
-                if self
-                    .target
-                    .instruction_set
-                    .to_ascii_lowercase()
-                    .contains("thumb")
-                    && entry & 1 == 0
-                {
-                    report
-                        .errors
-                        .push("ELF entrypoint is not a Thumb address for a Thumb target".into());
-                }
-            }
-        }
-
         // --- undefined symbols (zero-import policy) ------------------
         for sym in file.symbols() {
             if sym.is_undefined() {
@@ -173,6 +130,10 @@ impl<'a> Verifier<'a> {
             if let SectionFlags::Elf { sh_flags } = flags {
                 sh_exec = sh_flags & 0x4 != 0; // SHF_EXECINSTR
                 sh_write = sh_flags & 0x1 != 0; // SHF_WRITE
+                if sh_flags & 0x2 != 0 {
+                    // SHF_ALLOC
+                    report.summary.resident_bytes += sec.size();
+                }
             }
             let kind = sec.kind();
             let is_exec = sh_exec || matches!(kind, SectionKind::Text);

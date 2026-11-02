@@ -23,7 +23,6 @@
     "source": "bindiff-inspired-ensemble-v2 source=xiaomi-band-10-pro-3.101.036 report=targets/xiaomi-band-9-3.1.32/evidence/fw-match/ensemble-1036-to-9132-v2.json"
   },
   "entry_address": "0xc150da8",
-  "callable_address": "0xc150da9",
-  "notes": "Rejected after exact-IDB review: 0x0C150DA8 wraps a timing/delay routine, not modhandle. The exact image contains no modhandle or modlib string evidence.",
+  "notes": "Rejected after exact-IDB review: 0x0C150DA8 wraps a timing/delay routine, not modhandle. The exact image contains no modhandle or modlib string evidence. 2026-10-24 restored exact 3.1.32 records; earlier approval withdrawn, restricted/PENDING, device not probed. Loader is now Band-11-style staged, not the rejected NSH path.",
   "approval_state": "REJECTED"
 }

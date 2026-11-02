@@ -199,18 +199,12 @@ int canopus_manager_render_module_detail(const struct canopus_manager_model_v1 *
             mod->lifecycle_class == CANOPUS_LIFECYCLE_RESIDENT_AFTER_ACTIVATION ? "激活后常驻" :
             mod->lifecycle_class == CANOPUS_LIFECYCLE_ALWAYS_RESIDENT ? "始终常驻" :
             "需补丁/重启");
-    canopus_text_writer_append(&w, "\n签名     : ");
-    canopus_text_writer_append(&w,
-                               mod->signature_ok ? "已验证" : "未签名/开发版");
     canopus_text_writer_append(&w, "\n风险     : ");
     writer_append_u32(&w, mod->risk);
     canopus_text_writer_append(&w, "\n");
 
     /* available operations for THIS class — never a fake unload. */
     canopus_text_writer_append(&w, "操作: ");
-    if (canopus_manager_can_update(m, m->selected)) {
-        canopus_text_writer_append(&w, "[更新] ");
-    }
     if (canopus_manager_can_rollback(m, m->selected)) {
         canopus_text_writer_append(&w, "[回滚] ");
     }
@@ -237,10 +231,8 @@ int canopus_manager_can_activate(const struct canopus_manager_model_v1 *m,
     const struct canopus_manager_module_v1 *mod;
     if (m == 0 || index >= m->module_count || m->safe_mode) return 0;
     mod = &m->modules[index];
-    /* Signature gating removed (dev/universal policy): unsigned modules are
-     * offered immediate activation like any other. Immediate activation is
-     * still separate from next-boot enable, and reboot-only modules or
-     * residents are never re-launched here. */
+    /* Explicit activation is separate from next-boot enable. Never offer an
+     * immediate launch of reboot-only modules, or reload a resident. */
     return mod->lifecycle_class < CANOPUS_LIFECYCLE_PATCH_REBOOT_REQUIRED &&
            (mod->state == CANOPUS_STATE_READY || mod->state == CANOPUS_STATE_ENABLED);
 }
@@ -300,21 +292,6 @@ int canopus_manager_can_remove(const struct canopus_manager_model_v1 *m,
     mod = &m->modules[index];
     return mod->state != CANOPUS_STATE_UNLOADED &&
            mod->state != CANOPUS_STATE_REMOVE_PENDING;
-}
-
-int canopus_manager_can_update(const struct canopus_manager_model_v1 *m,
-                               uint32_t index)
-{
-    const struct canopus_manager_module_v1 *mod;
-    if (index >= m->module_count) {
-        return 0;
-    }
-    mod = &m->modules[index];
-    /* CAN-P2-006: activation is never offered in safe mode. */
-    if (m->safe_mode) {
-        return 0;
-    }
-    return mod->state != CANOPUS_STATE_UNLOADED;
 }
 
 int canopus_manager_can_rollback(const struct canopus_manager_model_v1 *m,
@@ -380,6 +357,15 @@ uint32_t canopus_manager_op_install(struct canopus_manager_model_v1 *m,
                         (uint32_t)(package_ref ? canopus_strlen(package_ref) + 1 : 0));
 }
 
+uint32_t canopus_manager_op_scan(struct canopus_manager_model_v1 *m)
+{
+    /* Importing stages code for the next boot; not offered in safe mode. */
+    if (m->safe_mode) {
+        return CANOPUS_RESULT_DISALLOWED;
+    }
+    return send_command(m, CANOPUS_CMD_SCAN, 0, 0);
+}
+
 uint32_t canopus_manager_op_activate(struct canopus_manager_model_v1 *m,
                                      uint32_t index)
 {
@@ -422,16 +408,6 @@ uint32_t canopus_manager_op_remove(struct canopus_manager_model_v1 *m,
                         CANOPUS_MANAGER_MODULE_ID_MAX);
 }
 
-uint32_t canopus_manager_op_update(struct canopus_manager_model_v1 *m,
-                                   uint32_t index)
-{
-    if (!canopus_manager_can_update(m, index)) {
-        return CANOPUS_RESULT_DISALLOWED;
-    }
-    return send_command(m, CANOPUS_CMD_UPDATE, m->modules[index].module_id,
-                        CANOPUS_MANAGER_MODULE_ID_MAX);
-}
-
 uint32_t canopus_manager_op_rollback(struct canopus_manager_model_v1 *m,
                                      uint32_t index)
 {
@@ -440,6 +416,18 @@ uint32_t canopus_manager_op_rollback(struct canopus_manager_model_v1 *m,
     }
     return send_command(m, CANOPUS_CMD_ROLLBACK, m->modules[index].module_id,
                         CANOPUS_MANAGER_MODULE_ID_MAX);
+}
+
+uint32_t canopus_manager_op_exit_safe_mode(struct canopus_manager_model_v1 *m,
+                                           uint32_t action)
+{
+    uint8_t payload[4];
+    if (!m->safe_mode || action > 2u) {
+        return CANOPUS_RESULT_DISALLOWED;
+    }
+    payload[0] = (uint8_t)action;
+    payload[1] = payload[2] = payload[3] = 0u;
+    return send_command(m, CANOPUS_CMD_EXIT_SAFE_MODE, payload, sizeof(payload));
 }
 
 uint32_t canopus_manager_op_safe_mode(struct canopus_manager_model_v1 *m)

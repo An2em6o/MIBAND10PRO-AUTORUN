@@ -128,11 +128,9 @@ sdk/rust/
 └── canopus-target-private/      手写语义 facade、ownership 和 ABI 翻译
 
 manager/target/
-├── lvgl_v9/                     当前 Band 10 UI backend
-└── lvgl_v8/                     当前 Band 9 UI backend
+└── lvgl_v9/                     当前 Band 10 UI backend
 
 runtime/loader/                  portable ELF32 loader/relocation core
-manager/target/band9/            Band 9 early bootstrap/stage adapter
 watchfaces/canopus-installer/    Lua bootstrap、staged resources、控制 UI
 ```
 
@@ -395,23 +393,14 @@ pub const CANOPUS_FW_<NAME>_CALLABLE: usize = ...;
 
 ### 8.1 生成命令
 
-当前 C 命令同时生成 veneer 和 target config：
+统一生成命令（C veneer、target config、Rust bindings、SDK private-symbol 元数据、Band 11 native 地址头一次产出；
+输出路径由 `target.toml` 的 `rust_module` 与 `targets/_families/<family>.toml` 决定）：
 
 ```sh
-cargo run -p canopus-cli -- \
-  target generate-veneer <target-id> --targets-dir targets
+cargo run -p canopus-cli -- target generate <target-id>   # 单个
+cargo run -p canopus-cli -- target generate --all         # 全部 active target
+cargo run -p canopus-cli -- target generate --all --check # CI：生成物过期则失败
 ```
-
-Rust bindings：
-
-```sh
-cargo run -p canopus-cli -- \
-  target generate-rust-bindings <target-id> \
-  --targets-dir targets \
-  --output sdk/rust/canopus-target-generated/src/<target-file>.rs
-```
-
-新增 target 时不要依赖 Rust 命令的默认 `generated.rs` 路径；为非默认 target 显式指定输出，避免覆盖另一个 target。
 
 生成后必须运行 byte-for-byte stability tests。任何直接编辑 generated 文件的修改都应被丢弃并回到 generator/records 修复。
 
@@ -592,8 +581,8 @@ Band 9 当前使用 tracked MPU region ownership 和 normal non-cacheable dynami
 先识别 UI ABI family：
 
 ```text
-LVGL v9-compatible → manager/target/lvgl_v9
-LVGL v8/BES ABI    → manager/target/lvgl_v8
+LVGL v9-compatible → manager/target/canopus_manager_target.c
+LVGL v8/BES ABI    → 已随 Band 9 冻结移除（git tag band9-frozen）
 其他 UI family     → 新 backend，不能硬套现有布局
 ```
 

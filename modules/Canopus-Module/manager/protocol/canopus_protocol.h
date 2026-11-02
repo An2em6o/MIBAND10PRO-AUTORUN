@@ -26,12 +26,36 @@ enum canopus_command {
     CANOPUS_CMD_ENABLE,
     CANOPUS_CMD_DISABLE,
     CANOPUS_CMD_REMOVE,
-    CANOPUS_CMD_UPDATE,
+    CANOPUS_CMD_UPDATE, /* removed: updates are INSTALL of a newer version; opcode reserved */
     CANOPUS_CMD_ROLLBACK,
     CANOPUS_CMD_QUERY_MODULE,
     CANOPUS_CMD_QUERY_DEVICE,
     CANOPUS_CMD_ENTER_SAFE_MODE,
     CANOPUS_CMD_ACTIVATE,
+    CANOPUS_CMD_SCAN,
+    /* Framework installer: payload-free INSTALL stages (payload: u32 stage 0..2). */
+    CANOPUS_CMD_NATIVE_STAGE,
+    /* Apply enabled boot intents after the Supervisor's own load. */
+    CANOPUS_CMD_RESTORE_AFTER_BOOT,
+    /* Native .canopus delivery: CMI2 receipt, ordered ELF chunks, verify, cancel. */
+    CANOPUS_CMD_STAGE_BEGIN,
+    CANOPUS_CMD_STAGE_WRITE,
+    CANOPUS_CMD_STAGE_FINISH,
+    CANOPUS_CMD_STAGE_ABORT,
+    /* CanopusConnect (ADR-CAN-009): module <-> remote messages over L2 0x43.
+     * They are handled before the Manager dispatch and never touch its state. */
+    CANOPUS_CMD_CONNECT_SEND,    /* phone -> module: kind, id, data */
+    CANOPUS_CMD_CONNECT_LISTEN,  /* phone -> device: start/stop module pushes */
+    CANOPUS_CMD_CONNECT_MESSAGE, /* device -> phone EVENT: kind, id, data */
+    /* Leave safe mode at the next boot (payload: u32 canopus_safe_exit_action). */
+    CANOPUS_CMD_EXIT_SAFE_MODE,
+    CANOPUS_CMD_QUERY_BOOT,
+    CANOPUS_CMD_SET_BOOT,
+    CANOPUS_CMD_START_BOOT,
+    /* Native package resources, following the verified artifact stream. */
+    CANOPUS_CMD_STAGE_RES_BEGIN = 26,
+    CANOPUS_CMD_STAGE_RES_WRITE = 27,
+    CANOPUS_CMD_STAGE_RES_FINISH = 28,
 };
 
 struct canopus_proto_request_v1 {
@@ -59,13 +83,15 @@ struct canopus_proto_response_v1 {
 #define CANOPUS_PROTO_REQUEST_SIZE  sizeof(struct canopus_proto_request_v1)
 #define CANOPUS_PROTO_RESPONSE_SIZE sizeof(struct canopus_proto_response_v1)
 
-/* Fixed max control payload; bulk data must use a separate stream. */
+/* Fixed frame payload bound; native ELF uploads use ordered STAGE_WRITE chunks. */
 #define CANOPUS_PROTO_MAX_PAYLOAD 512u
 
 /* Read-only Manager query payloads carried inside CPC2 responses. They are
  * byte-encoded little-endian records, never cast to packed C structs. */
 #define CANOPUS_QUERY_DEVICE_MAGIC 0x43514431u /* "CQD1" */
-#define CANOPUS_QUERY_DEVICE_SIZE  32u
+/* +84: requests the device's L2 transport holds at once (0: unknown, assume 4). Readers accept
+ * any size from 84 on; the 84-byte record of older Supervisors simply lacks the field. */
+#define CANOPUS_QUERY_DEVICE_SIZE  88u
 #define CANOPUS_QUERY_MODULE_MAGIC 0x43514D31u /* "CQM1" */
 #define CANOPUS_QUERY_MODULE_SIZE  64u
 
@@ -113,6 +139,11 @@ int canopus_transport_v2_decode_request(const uint8_t *buf, uint32_t len,
 int canopus_transport_v2_encode_request(const struct canopus_proto_request_v1 *req,
                                         const void *payload,
                                         uint8_t *out, uint32_t cap);
+/* Encodes an unsolicited v2 EVENT record (message kind 3, request id 0).
+ * Returns the number of bytes written, or -1. */
+int canopus_transport_v2_encode_event(uint32_t opcode, const void *payload,
+                                      uint32_t payload_len,
+                                      uint8_t *out, uint32_t cap);
 /* Decodes a complete v2 RESPONSE record. Returns its echoed opcode and payload
  * offset without exposing packed wire structs. */
 int canopus_transport_v2_decode_response(const uint8_t *buf, uint32_t len,
@@ -127,6 +158,40 @@ int canopus_transport_v2_encode_response(const struct canopus_proto_response_v1 
                                          const void *payload,
                                          uint32_t payload_len,
                                          uint8_t *out, uint32_t cap);
+
+/* ------------------------------------------------------------------ */
+/* MiWear Layer 2 Transport Channel (ADR-CAN-008)                     */
+/*                                                                     */
+/* Canopus dedicated channel multiplexed inside Xiaomi WearPacket L2.  */
+/* Peer to TRANSPORT_CHANNEL_PB (0x01). Payload carries CPC2 wire     */
+/* envelopes. Supported opcodes match Xiaomi L2:                      */
+/*   1 = Write (plaintext)                                            */
+/*   2 = WriteEnc (AES-128-CTR session encrypted)                     */
+/*   3 = Read                                                         */
+/* ------------------------------------------------------------------ */
+
+#define CANOPUS_L2_CHANNEL          0x43u /* 'C' */
+#define CANOPUS_L2_OPCODE_WRITE     1u
+#define CANOPUS_L2_OPCODE_WRITE_ENC 2u
+#define CANOPUS_L2_OPCODE_READ      3u
+
+/* ------------------------------------------------------------------ */
+/* CanopusConnect wire format (ADR-CAN-009)                           */
+/*                                                                     */
+/* CONNECT_SEND, CONNECT_LISTEN and CONNECT_MESSAGE carry:             */
+/*   u8 kind-or-enable | u8 id length (1..16) | id bytes | data        */
+/* kind is CANOPUS_CONNECT_TEXT/BINARY; enable is 1 (listen) or 0.     */
+/* LISTEN carries no data. The SEND/LISTEN response payload is one      */
+/* CANOPUS_CONNECT_STATUS_* byte; COMPLETED means OK, DISALLOWED means  */
+/* a refusal status, REJECTED a malformed request.                      */
+/* ------------------------------------------------------------------ */
+
+#define CANOPUS_CONNECT_ID_MAX 16u
+#define CANOPUS_CONNECT_STATUS_OK            0u
+#define CANOPUS_CONNECT_STATUS_MODULE        1u /* no installed module has this id */
+#define CANOPUS_CONNECT_STATUS_NOT_LISTENING 2u /* the module registered no listener */
+#define CANOPUS_CONNECT_STATUS_FULL          3u /* the Supervisor's listener table is full */
+#define CANOPUS_CONNECT_STATUS_FORMAT        4u
 
 /* ---- pending-request state machine (CAN-P1-002) -------------------- */
 /* A request_id is tracked so the manager can report real async state.

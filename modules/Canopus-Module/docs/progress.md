@@ -1,12 +1,159 @@
 # Canopus 实施进度
 
+> 2026-10-14 起任务进度的唯一来源是 [`refactor-plan.md`](refactor-plan.md)；本文只保留能力状态与历史记录。
+
 权威进度追踪位于两份文档：
 
-- 任务进度追踪区：[`architecture.md`](architecture.md) §23。
+- 任务进度追踪区：[`architecture.md`](archive/architecture.md) §23。
 - P0/P1/P2 强制整改状态（每个 CAN-P?-??? ID 的 OPEN / BLOCKED-EVIDENCE /
   HOST-FIXED / CLOSED-GATED / CLOSED）：[`native-manager-ui-plan.md`](native-manager-ui-plan.md) §15。
 
 本文档是轻量索引，不与上述权威表重复。任何"预计通过"不得写成"已通过"。
+
+## 当前 UI 接口边界
+
+Toast API 已按用户要求移除，原节点编号 11 与能力位 16 停用，其余 UI ABI 编号不变。本文及既有证据中的 Toast 结果属于移除前的历史，不代表当前可用能力；其余能力状态不变。
+
+## 原生投递能力边界（2026-10-17）
+
+- 原生 `.canopus` CPC2 分块暂存、回执校验与 host 测试：host implemented。
+- .043 / .155 SRAM L2 回调与加密 ABI：static recovered；普通构建自动包含对应 target 的后端，不需要额外启用参数。双 owner 后端将 UI 命令处理与 Bluetooth 任务的响应发送分开，避免跨 NuttX task-group 写蓝牙 fd。
+- Band 11 `.155`：生产安装器 bootstrap、真实 AstroBox core 加密 L2 原生 `.canopus` 安装与模块列表查询已在 Mirage 通过（2026-10-17，仅 emulator 证据）。待打包目录随普通构建包含通信后端。`.043` 的独立原生安装已通过，但完整 fresh-device smoke 的 phone flow 尚未闭环。
+- 相关符号保持 restricted / PENDING / not_probed；没有提升为 device verified 或 production approved。
+- 快应用容器、快应用目录和列表管理方案已撤销；历史验证记录不作为新数据面证据。
+
+## 四款固件的快速静态适配（2026-10-24，仅静态）
+
+- 新增 exact target（全部记录 `restricted` / `PENDING` / `not_probed`，无批准、无能力状态）：
+  - `xiaomi-band-9-3.1.32`（n66，SHA `9c02dab4…3264`）：从 tag `band9-frozen` 恢复 143 条精确记录，原 40 条 APPROVED/managed 全部降为 restricted/PENDING；
+  - `xiaomi-band-9-pro-3.1.190`（n67cn，SHA `3e264bc2…f82f`）：从 3.1.175 包移植，20,956 个互唯一种子，123 条函数中 108 条 STATIC_RECOVERED、15 条 CANDIDATE；
+  - `xiaomi-band-10-3.1.28`（o66tc，SHA `fb726472…8845`）：从 Band 9 3.1.32 包移植，47 条 STATIC_RECOVERED、92 条 CANDIDATE、3 条 FORBIDDEN；
+  - `redmi-watch-6-3.100.043`（p65，SHA `a19b6014…5858`）：从 Band 10 Pro `.043` 包移植，仅接受函数体相等且有调用/位置支撑的记录，其余保持 CANDIDATE。
+- 生成物可重建（`canopus target generate --all --check` 9/9），`generated_stability` 18/18 通过。四者的 loader 均标注为 Band-11 风格 Lua-owned staged loader（无 `insmod`、无 Lua `os.execute` 恢复），但 stage1/stage2、installer staging 与设备/模拟器验证尚未实现；`loader/README.md` 写明边界。
+- **UI family**：Band 9 / Band 9 Pro / Band 10 是 LVGL v8，需要专门的 v8 Manager 后端（旧的 v8 后端随 `band9-frozen` 删除）；Band 11 / Band 10 Pro / REDMI Watch 6 是 LVGL v9。
+- 四个 target 均生成 `canopus-target-generated` Rust 绑定与 feature（限制记录不生成 public typed wrapper）；仍无 Supervisor 构建支持、无 family 层、无 loader/installer，没有真机或 Mirage 运行，未提升任何能力状态。
+
+## Band 11 `4.100.179` 与全局 safe mode（2026-10-20）
+
+- `.179`（q66tc，build `user-4.100.179-cn-202609302100`）由已审核的 `.155` 包移植：270 条符号记录全部 `restricted` / `PENDING` / `not_probed`，
+  没有任何批准、真机证明或能力状态从 `.155` 带过来（`generated_stability.rs` 的 `band11_179_carries_no_approval_from_155` 钉住）。
+  当前 280 条记录中有 227 条 `STATIC_RECOVERED`、52 条 `CANDIDATE`、1 条 `FORBIDDEN`。2026-10-24 revision 2 以完整 `.177` / `.179` 函数体和 IDA ABI 复核独立恢复 `lv_obj_area_is_visible` 的精确入口 `0x0c381d4c` / Thumb `0x0c381d4d`；原 `.155` 比较的函数体差异仍保留在来源记录。见 `EVID-RESOURCE-VISIBILITY-4179-001`。仅该入口增加静态恢复证据，全部符号仍为 restricted / PENDING / not_probed，无新增 public veneer、promotion 或设备批准。
+- 2026-10-24：`.179` 原生 UI 输入/滚动/图片适配/字体绑定在精确 `.179` IDB 上独立恢复并接线（15 个宏绑定 + 生成器 ABI 常量）：`lv_event_get_indev 0x0c37fc70`、`lv_indev_get_point 0x0c399b90`、`lv_obj_get_scroll_y 0x0c37ff8c`、`native_font_create 0x0c4942e0`、`native_font_release 0x0c915854`、`native_font_wait 0x0c3998a8` 新恢复；`lv_obj_scroll_to_y` / `lv_obj_update_layout` / `lvx_image_set_scale` / `lv_image_decoder_get_info` / 5 个 font_reload 身份沿用已审核 port 记录。事件码、样式属性 ID、对象坐标偏移、display/layer/draw_unit 结构偏移与 font manager 间接全部在 `.179` 反汇编中逐项核实（值与 `.155` 相同但独立成立），证据 `EVID-UI-4179-LAYOUT-INPUT-001` / `EVID-UI-4179-FONT-LIFECYCLE-001`。Supervisor 重新构建 133,068 / 133,120 字节、常驻 183,370 / 184,320，verifier PASS；host 能力位从此覆盖 Corona 需要的 0x39ff6。全部记录仍为 restricted / PENDING / not_probed，**仅 host/static 证据，无真机验证、无能力状态提升**；`.179` 的 `style-card` 与三项输入 gate 自此解除（上文 2026-10-23 的 gate 描述为当时状态）。
+- host / emulator 证据：Unicorn 里真实 `.179` 镜像执行 stage1 → stage2 → Supervisor（两种重定位基址）、Manager 注册、原生 UI 指令与通知路径；
+  Mirage 里真实 `.179` 固件经生产安装器 Run → 加密 L2 `.canopus` 安装 → SCAN，services 测试 26/27（仅振动跳过）。
+- 全局 safe mode：自动进入（连续 3 次未完成的启动、3 次模块隔离而没有一次好启动、注册表不可读）、重启保持、`EXIT_SAFE_MODE`（保持 / 全部停用 / 全部回滚）退出并试运行一次、
+  试运行没有稳定就回到 safe mode；Manager 在 safe mode 里提供退出入口。host 测试，未上真机。
+- `.043` Supervisor 123,348 / 131,072 字节（2026-10-23 复审修复版构建）；`supervisor_max_size` 已由 114,688 提到 131,072（构建期预算，非常驻 RAM 上限，
+  常驻 161,958 / 163,840 未放宽）。
+
+## 原生 UI ABI 2.0 与模块生命周期（2026-10-23）
+
+- 公共 ABI 直接演进到 2.0：`ctx->ui_ext` 并入 `ctx->ui` 并删除，事件改为 `canopus_ui_event_v1`，新增显式能力协商、
+  `node_set_visual`、`control`（滚动/位移/捕获）、`post`。**host implemented**，见 ADR-CAN-013。
+- 能力按 target 判定，不支持显式返回 `ERR_UNSUPPORTED`；`.043` / `.155` 图片适配（`NATIVE/CONTAIN/COVER/STRETCH`）与任意非零 16-bit 字号（`CANOPUS_UI_CAP_FONT`，按字号缓存 managed wrapper + 原生标签 `DELETE` 绑定 + 渲染队列/VG wait 退役）现已在 host 接入，其它目标仅 `NATIVE` 与 `0/24/28`。
+  能力矩阵、生命周期证明、防御性代码消融、五目标预算（`supervisor_max_size` 构建阈值 `131072 -> 133120`，非已证硬件上限，常驻上限未改）、静态证据与双后端四变体回归见 [verification](native-ui-image-font-verification.md)、[font lifecycle ABI](native-ui-font-lifecycle-abi.md)、[ablation](native-ui-defensive-ablation.md)、ADR-CAN-010 / refactor-plan P7.13；只新增 host/static 证据，无新增真机验证或生产批准。
+- 模块生命周期走既有 bus（`"canopus/module/state"` + `query_module`），UI 更新经 `ctx->ui->post`，无线程无轮询。
+- host 回归（含双后端 ASan/UBSan）、Rust 215 项、生成物检查、五个 active target 构建与 ELF 校验通过。
+  隔离 Mirage 中 `.043` / `.155` 完整 Lab 通过（选中第 40 / 46 项并返回恢复），`.179` 支持路径通过，显式 gated 虚拟滚动/指针拖动/捕获。
+  证据与构建哈希见 [`evidence/native-ui-abi2-2026-10-23`](evidence/native-ui-abi2-2026-10-23/README.md)。
+  2026-10-23 复审 R1–R14（1 high + 13 medium）已修复并重新验收：正式回归进 CI，隔离 Mirage review7 复跑显示/隐藏/重显/到期 Toast 四态、
+  标题/重置卡片与超 32 项列表恢复；`.043`/`.179` 因样式属性 ID 未审计 gate `style-card`（`stylefallback` 显式降级），`.179` 另 gate 三项输入能力。
+  逐项结果与红绿日志见 [`evidence/native-ui-abi2-review-fixes-2026-10-23`](evidence/native-ui-abi2-review-fixes-2026-10-23/README.md)。
+  二次复审回归 N1/N2（多 Toast staged 所有权、CANCEL 销毁后二次删除）已修复并补正式回归（含 ASan/UBSan 与红现场）；staging 所有权/清理按节点类型收口（audit-findings F1–F7）。重新验收见 [`evidence/native-ui-n1n2-fixes-2026-10-23`](evidence/native-ui-n1n2-fixes-2026-10-23/README.md)。
+  三次复审 M1（别名 Toast 样式写共享 owner）/L1（尾随隐藏 Toast 压掉可见 Toast）已修复并补正式回归；Toast 驱动规则收口为"最近可见 Toast 驱动、无可见时隐藏"。重新验收见 [`evidence/native-ui-m1l1-fixes-2026-10-23`](evidence/native-ui-m1l1-fixes-2026-10-23/README.md)。
+  四次复审 M2（驱动切换不重绘共享 owner 样式）已修复（切换走替换路径全量重绘）并补正式回归；写入面矩阵定稿无残留缺口。重新验收见 [`evidence/native-ui-m2-fixes-2026-10-23`](evidence/native-ui-m2-fixes-2026-10-23/README.md)。
+  四次复审 P1/P2（隐藏期样式写残留/隐藏 fresh 节点替换 owner——样式重绘与文本重绘脱钩）按根因修复（不变量：owner 文本被重写 ⇒ 样式同步重绘，隐藏节点不写不替换）、T1（双 header 争 title 改 first-HEADER 驱动）、D1（矩阵补 hidden 触发源）已完成并补正式回归；重新验收见 [`evidence/native-ui-p1p2-fixes-2026-10-23`](evidence/native-ui-p1p2-fixes-2026-10-23/README.md)。能力状态未提升。
+- **能力状态未提升**：新增能力仍为 **host implemented**，模拟器只增加 host/emulator 证据；没有新的真机验证或 production approval。
+
+## 固化启动与可见的故障恢复（2026-10-21，host / 模拟器证据）
+
+- **固化启动**（ADR-CAN-012，Band 10 Pro `.043` 与 Band 11 `.155` / `.179`）：默认不固化；AstroBox 的 Canopus 页面确认后，Supervisor 经 `/dev/bes_flash` 把 `rc.sysinit` 的一段等长差异尾段改成
+  `sh /data/canopus/b &`，重启后不依赖当前表盘自动加载 Supervisor 并注册 Manager；解除固化写回原内容。Mirage：Band 10 Pro `.043` A 段闪存读写/解除通过；B 段用离线打补丁的 AP 镜像冷启动，
+  不手动加载，Supervisor 自己起来，点亮屏幕一次、熄屏后序列走完。亮屏注册 Manager 会使模拟设备复位，所以状态机只在熄屏时推进。**没有真机运行，物理启动验收未做。**
+  Band 11：为 `.155` 和 `.179` 实现独立原生引导载荷（`boot.lua` 内嵌 target 原生 loader 及 profile，加载 stage1 → stage2 → supervisor 至 Umem 并发 `START_BOOT`，由熄屏状态机推进完成 Manager 注册并清除 `boot.pending`）；Mirage 冷启动冒烟测试（`scripts/emu/boot_smoke.py 155` / `179`）全通。`.139` 无后台泵，不支持。安装器页面的延时 Auto-run 已删除。
+- **故障恢复可见**：Manager 首页写明安全模式原因与“模块仍已安装，本次暂不加载”；被自动停用/回退的模块留在列表里并说明原因；启动后一条通知（安全模式含原因，或哪个模块被自动处理；正常则“Canopus 已加载，管理器可用”）。
+  AstroBox 同步显示，且退出安全模式改为先确认。
+- **退出安全模式的真实缺陷**：触发阈值的崩溃计数不清零，退出后下次启动立刻又进 safe mode；批量回退逐模块写盘并吞错误。已修，host 测试覆盖真实阈值路径。
+- **稳定窗口熄屏也走**：稳定监视同时挂在 owner 后台泵上，熄屏超过 60 s 后启动标记照常清除。
+- **体积**：Band 10 的 Supervisor 构建去掉每个函数一条的 `.ARM.exidx` 表（C 模块里无用，连同重定位约 8 KiB），`.043` 现为 109,180 / 114,688 字节（此前 112,304）。`.155` 127,940 / 131,072。
+
+## 平台硬件服务边界（2026-10-18）
+
+- 原先的占位实现已移除：亮度恒 100、息屏状态恒亮、振动忽略时长、电量恒 85、蓝牙恒已连接、唤醒锁无归属、
+  `l2_register_rx` 只保存不派发、通知忽略标题。现在每个钩子要么调用 exact-target 的固件入口，要么为空并返回
+  `UNSUPPORTED` / 文档化的"未知"值。
+- 文件服务补全：绝对路径任意读写，只保护 Canopus 自己的状态（`/data/canopus`、`/dev/canopus`、`/canopus`，不区分大小写、先规整再判断）；
+  相对路径落在 `/data/canopus/m.<id>/`（原先的 `m.<id>.<name>` 扁平命名会让 `mod.a`/`b.x` 与 `mod.a.b`/`x` 撞名，已改为每模块一个目录）；
+  `mkdir`、`fsync`、`stat`（含 mtime）、`APPEND`/`READ|WRITE`、固件 errno 的如实映射（缺失文件为 `NOTFOUND`）。
+- 2026-10-24：FS 组版本 2 追加 `rmdir`（C/Rust），仅删除空目录，非空返回 `NOTEMPTY(-39)`，沿用路径规整与状态目录保护。
+  `.043/.139/.155/.179` 的固件入口已静态恢复（`EVID-RMDIR-*`，restricted / PENDING / not_probed）；`.036` 无入口证据，保持 FS 版本 1。
+  C host ASan/UBSan、Rust ABI/runtime、五目标服务模块与 Supervisor 构建/verifier、建模 Thumb 适配器测试通过；未做真实文件系统或真机验证，不提升能力状态。
+- 系统事件广播（亮灭屏、电量、蓝牙状态）由定时器泵每 500 ms 采样发布，模块无法伪造这三个主题。
+- Band 11 `.139/.155` 普通 UI 构建补齐 10 ms LVGL timer pump，入口来自已有精确 target 私有符号，
+  沿用现有软件 timer 调度；headless 不支持。LVGL 暂停时不保证后台触发，UI 重建后的自动恢复仍不支持；
+  这些 timer 入口保持 `restricted / STATIC_RECOVERED / PENDING / not_probed`，不属于上述新硬件入口的缺失项。
+- host implemented：上述服务逻辑与 C host 测试（含 ASan/UBSan）。
+- static recovered（`restricted` / `PENDING`，`device: not_probed`）：Band 10 Pro .036/.043 与 Band 11 .139/.155 的 PowerManager、
+  MiWearScreen、vibrator、property、`mkdir` 入口，证据 `EVID-PLATFORM-HW-*`。.036/.139 由 .043/.155 的函数体匹配得到。
+- 未提升任何能力状态：没有 device verified，也没有 production approved。services 测试已在 Mirage 运行（仅 emulator 证据）：Band 10 Pro `.043` 22/26（4 项显式跳过：timer、振动、screen-on、通知）、Band 11 `.155` 25/26（仅振动跳过，模拟器里没有可达的 vibrator）；.036/.139 没有模拟器运行。
+- `get_rssi` 与仅 CPU 的唤醒锁已从 ABI 移除；`is_connected` 改读固件 `system_all_state` 的 MiWear 链路状态（.036/.043/.139/.155）；通知图标改为调用方传入的绝对路径（`post_with_icon` 的 `icon_path`）。
+
+## CanopusConnect（2026-10-18）
+
+- 模块与 AstroBox 插件按模块 id 互发文本/二进制消息（`ctx->connect`，ADR-CAN-009）：CPC2 新增 opcode 19/20/21，走 L2 0x43，
+  先于管理器分发处理、不碰管理器状态，发出的事件用独立的 2 槽队列并排在管理器响应之后；`ctx->bt->l2_send` 现在拒绝 0x43。
+- host implemented：设备端交付/拒绝/监听按会话失效/与管理器状态隔离（C host 测试，含 ASan/UBSan）；Rust ABI 与 `canopus-runtime::connect`；
+  AstroBox core 的线格式与事件、pluginsystem（API Level 4）的 `canopusconnect` 宿主接口与可选的 `on-message` 导出、插件权限提示（zh_CN / en_US）。
+- 仅 .043 / .155 提供（需要 L2 后端），其它 target 的 `ctx->connect` 为空。发送队列、`l2_peer` 与 owner 上的发送顺序是 ARM 代码，
+  Mirage `.043` / `.155` 的 services 测试已执行 listen/send/remote listening（仅 emulator 证据）；没有 AstroBox 端到端收发，也没有真机运行；未提升任何符号或能力状态。
+
+## 模块注册入口统一（2026-10-18）
+
+- Band 10 Pro 原厂 modlib 的构造函数没有 ctx，只能向 `/dev/canopus` 写 CMR1；Band 11 / portable 的构造函数在 r0 拿到 ctx，走 `ctx->services->module_register`。
+  现在两条路只有一个 SDK 入口 `sdk/c/canopus_module_entry.h`（`CANOPUS_MODULE_ENTRY` / `canopus_module_register`），按目标生成配置在编译期选路径；见 ADR-CAN-006 与服务规范 §3。
+- 顺带查出并修正：`canopus new` 的 target 模板只有 TODO 桩、`canopus module new` 与 Rust 构造函数 shim、`hello.c` 从来没有注册 descriptor（没有任何 loader 读 `canopus_module_descriptor` 符号）；
+  `hello.c`、no-heap-counter 与旧脚手架的 `module_id` 与清单 id 不符，Supervisor 会拒绝注册；Rust 模块此前被限制在 stock-modlib 目标，现在 Band 11 也能构建、通过 verifier，并在 Mirage `.155` 上激活（`canopus new --lang rust` 的模块）。Rust 产物原先带着 debug 段和内嵌 bitcode，其 `.rel.debug_*` 指向未装载的段，Canopus 自己的 ELF loader 判为无效；链接时用 `sdk/rust/c_shim/module.ld` 丢弃它们（51 KB → 12 KB），no-heap-counter 的 `--whole-archive`（2871 个段，超过 loader 的 256 上限）也已去掉，CI 现在用 host loader 检查 Rust 与 C 产物；
+  services 测试里仅 Band 10 Pro 才有的原始固件写文件（与 `ctx->fs` 重复）已删。
+- Band 11 的 Inline Hook：引擎把 `0x1C…` 指令别名当只读 Flash 一概拒绝，模块自己的代码因此无法 Inline Hook（`.155` services 测试里两项失败，HEAD 上本来就有）。现在平台注册代码视图，经数据视图写入补丁与 trampoline 并做 cache 发布（规范 §2.8）；Unicorn 与 Mirage `.155` 通过，真机 cache 维护未验证。
+- CI gate 5 现在对全部 active target 脚手架并构建 Rust、target C 与 portable C 模块。
+- 证据级别：host 构建/verifier 与 host 测试；设备侧运行见各 emulator 记录，均不提升能力状态。
+
+## 原生 UI 宿主后端与模块页面（2026-10-18）
+
+- 通用后端 `manager/target/canopus_ui_host.c`（Band 10 Pro / Band 11 共用，ADR-CAN-010）：Manager 自己的三个页面改走它；`ctx->ui_ext`
+  让模块登记页面入口，Manager 详情页提供「打开界面」，由 Manager 应用的第 4 个固件页面承载。Manager 的确认框改为语义 `DIALOG`。
+- host implemented：入口登记/校验/释放、详情页行与路由、对话框节点顺序（C host 测试，含 ASan/UBSan）；Band 11 固件仿真下 Manager 渲染全部通过。
+- Band 10 Pro 的 `supervisor_max_size` 98,304 → 114,688（构建预算，不是实测的固件上限，未在真机验证）。
+- Mirage 模拟器端到端（`scripts/emu/ui_pages.py 043|155`，仅 emulator 证据）：真实 AstroBox core 装生产安装器表盘 → Run → 手机装 `ui-demo` →
+  触摸走完启动器 > Manager > 模块 > 启用 > 立即激活 > 打开界面 > 页面（开关、点击、第二层、标题返回、退出），`.043` 与 `.155` 均通过
+  （断言模块探针序列、运行状态与每步截图）。
+- 两个家族的控件、渲染与操作方式对齐：Band 10 Pro 现在也画真正的文本标签（MiSans-Medium）、图片、进度条，隐藏而不是删除不用的行，内容放得下时锁住滚动；
+  标题返回在两个家族都先交给模块的 `on_back`；对话框两边都用固件 msgbox（Band 10 Pro mode 2，Band 11 mode 4）。滑块已移除。
+  Band 10 Pro 的三处根因：标签缺 CJK 字体样式、`.043` 的 `lv_bar_create` 记录指错、隐藏用错了库入口（`lv_obj_set_hidden` 记录实为 `lv_obj_remove_state`，已在 `.036/.043` 改名并降为 restricted/PENDING，见 ADR-CAN-010）。
+- Mirage 控件演示 `ui-gallery`（表单、进度条、文本、图片、对话框、样式、自关页、标题返回）在 `.043` 与 `.155` 上端到端通过（仅 emulator 证据）；
+  Band 11 上还修掉单选不显示选中、重绘丢滚动位置、短页面被拖到底、提交失败后页面永久卡死（框架现在回收没完成的树）。
+- 新静态证据（restricted / PENDING / not_probed）：`EVID-UI-1036-HOST-001`、`EVID-UI-1043-HOST-001`、`EVID-UI-4139-MSGBOX-001`、`EVID-UI-4155-MSGBOX-001`；
+  更正了 `.043` `lv_bar_create` 与 Band 11 `.139/.155` 的 msgbox / object_delete 候选（原先指向别的函数）。
+- **真机验证与批准（2026-10-19）**：维护者在 `.043`（Band 10 Pro）与 `.155`（Band 11）真机上运行 UI 宿主，反馈正常，并授权提升为生产可用：
+  UI 宿主调用的固件入口（`.043` 28 个、`.155` 30 个）改为 `DEVICE_PROVEN` / `APPROVED`（证据 `EVID-UI-1043-DEVICE-001`、`EVID-UI-4155-DEVICE-001`，清单钉死在 `generated_stability.rs`），
+  策略仍是 `restricted`（目标私有，不对模块开放）。UI 宿主在这两个 target 上的能力状态：**device verified / production approved**；证据是维护者反馈，没有设备日志；
+  不含 Supervisor 安装路径与注销生命周期，§15 的 CAN-P0-007 等条目未改；`.036/.139` 状态不变。
+
+## 生产就绪整改（2026-10-20，仅 host/emulator 证据）
+
+- **常驻内存**：KV 不再缓存（原 `s_kv` 545 KiB 静态表），Supervisor `.bss` 由 627–647 KB 降到 69–90 KB；`canopus verify --max-resident` 与家族 `supervisor_max_resident`
+  是新的构建门槛（`.043` 上限 163,840，`.155` 上限 184,320）。这是构建预算，不是实测的固件上限。
+- **崩溃循环防护**：开机启动计数持久化，稳定 60 s 才清零；连续两次未稳定则回退旧代或禁用。global safe mode 自动升级与退出路径已在 K19 实现（见下）。
+- **portable 打包**：只给能传服务上下文的 loader（Band 11）生成 portable 产物。
+- **模块启动器入口**（ADR-CAN-011）：`ctx->launcher`，两步注册、无注销；Band 11 固件仿真覆盖；CAN-P0-007 仍为 BLOCKED-EVIDENCE。
+- ~~Auto-run~~（已被固化启动取代，见下）、**后台 timer**（`.043`/`.155`，time 组版本 2）、**商店清单 `canopus` 兼容元数据**（AstroBox 客户端，本地提交）。
+- 以上均无真机运行；`tests/hardware/gates.md` 新增了待验证的设备项。
+
+## Host CLI（2026-10-19）
+
+- `canopus` 命令行体验修整，见 [`cli.md`](cli.md)：仓库与 targets 目录统一定位（任意目录可用，包括装到别处的二进制）、target 版本后缀（`--target 155`）、
+  `new` 先校验再创建并带 `--ui` 模板、`package` 拒绝过期 ELF、新增 `clean` / `doctor` / `-v`、可操作的错误信息；`cli/canopus/tests/cli.rs` 3 项集成测试。
+  `--ui` 模板在 C 工程里按 5 个 target 的 `-Wall -Wextra -Werror` 编译并过 verifier，但没有在 Mirage 里跑过页面。
 
 ## 阶段状态
 
@@ -55,6 +202,7 @@
 | 日期 | 变更 | 证据/备注 |
 |---|---|---|
 | 2026-08-05 | 建立独立仓库 /Volumes/EXT0/Canopus | AGPL-3.0；CLI 采用 Rust；target id 重命名见 ADR-CAN-001 |
+| 2026-10-20 | 生产就绪整改（见上）：KV 流式化与常驻体积门槛、崩溃循环防护、portable 打包、启动器入口、Auto-run、后台 timer、商店清单兼容元数据 | 全量 CI 全绿；host/emulator 证据，无真机 |
 | 2026-08-05 | P0/P1 host 整改批次（见上） | 每项一个 commit、测试先行、`./scripts/ci.sh` 全绿 |
 | 2026-08-23 | 043 BluetoothAudio Bond `-1107` 第一轮静态纠错 | 撤销错误的 036 16-word/global ABI，恢复 043 stock bts globals 与 17-word descriptor；中间提出的 adapter+120/client+72 布局随后被 `-1113` 真机反馈推翻，不是闭环 |
 | 2026-08-23 | 043 BluetoothAudio Bond `-1113` host 修复，device retest pending | exact IDB 证明 adapter+120 是仅 0x24-byte 的 callbacks_list manager，registration handle 才是 `{cookie, descriptor}` 8-byte node；移除 manager+72 越界访问，改为 register mirror → unregister original → 更新 stock handle；新增 `-1114..-1117` 分支诊断与 failure evidence；无真机通过结论 |
@@ -76,39 +224,3 @@
 
 2026-09-16：Band 11 框架 prod 合并为一个目录/入口，同时携带 139/155 的四件 native 资源，根层共1个Lua+9个bin。两个版本的真实Lua C帧选择、错误build/重复身份拒绝、ARM启动及通知回归通过。Bluetooth Audio、Lyra Player 增加155 feature/profile，原生页面销毁槽位与Lyra屏幕布局/释放事件分支覆盖155；两模块prod同目录支持139/155，真实155签名产物过verifier、安装通知和ARM模块加载测试。RF/音频/真实显示仍DEVICE-PENDING。
 
-## 2026-09-23 P65 reconnaissance
-
-- Extracted and loaded the exact `vela_ap.bin` from the local P65 3.100.043 OTA with the supplied IDA loader. The loader was narrowly adjusted for the P65 header word and accepts the variant only after footer/alias metadata validates. IDA discovered 42,835 functions; exact AP SHA-256 is recorded in `targets/xiaomi-p65-3.100.043/target.toml`.
-- Added the P65 exact identity pack and generated Rust/C identity guard from the exact `ro.build.version` and boot `REV_INFO` strings. P65 remains analysis-only; no callable or device capability is promoted and the target-private backend is intentionally unavailable.
-
-## P65 safety incident — deployment withdrawn (current)
-
-- User reports Supervisor installation returned normally, Manager displayed `4294967291` (signed `-5`), and following the reboot/retry prompt caused a Logo boot loop before the watchface. REC data wipe/factory reset restored boot. There is no boot log, pre-reset filesystem snapshot or confirmed device artifact hash.
-- Exact AP IDA and Unicorn execution confirm the previous `write` address `0x0C248455` is pwrite, with a fourth, 64-bit stack argument never supplied by the provider. The correct plain fd write is `0x0C2497F1`. Wrong-offset writes are reproduced offline; this is not proof of the boot-loop trigger. Earlier write evidence is corrected.
-- Native stage and provider write errors both surfaced as `-5`; provider saves now map to distinct Supervisor registry errors. Lua displays signed values and native identity/app diagnostics, and removes the unsafe reboot/retry instruction.
-- P65 deployment is disabled in a shared native safety policy. Module entry rejects before initialization or escaped callbacks; native staging/Manager registration also deny. Normal builders and standalone packager refuse before output mutation. Installer mutation actions perform no shell/device writes; status performs no protocol-handoff write. No environment/CLI deployment bypass is provided.
-- The original local pack is preserved at ignored `build/p65-incident-0f62381/`, with hashes recorded in the incident report. The former installable path contains only a withdrawal notice. No replacement device package is provided.
-- Six experimental-policy tests, six exact-Thumb write tests, host ASan/UBSan, Rust P65 host/Thumb and offline guarded ELF verification pass. `--offline-audit` compiles only a module whose entry returns `-130`, without installer resources. These are not device approval or full-workspace passes.
-- Boot-loop trigger, stock app/Launcher persistent effects and failed-save commit ambiguity remain open. See `targets/xiaomi-p65-3.100.043/bootloop-incident.md`. Historical success/build descriptions below do not authorize deployment.
-
-## P65 experimental native integration (historical, now withdrawn)
-
-- At the user's request, P65 experimental builds no longer require a prior hardware gate and the standalone G0 watchface is removed. Exact AP/OTA identity and ABI/import/relocation/address checks remain. No device or production result is claimed.
-- The standard Supervisor builder dispatches P65 to a separate resident build. Its `module_initialize` entrypoint and integer-return unload callback follow exact AP code; negative unload return blocks modlib unlink/free. Exact VFS/fops registration, app/package lookup, page lifecycle (+100 UI-destroy), list/row/label events and notification-center input are bound experimentally. The LVX factory correction uses C8BC758 as create and C8BE008 as title setter.
-- Dual-slot persistence is bound to P65 fd wrappers, preserves the other slot during replacement, and is host-tested through fake exact-address dispatch. C scaffolds publish descriptors via a single CMR1 write, retaining the image after publication until reboot. Signed receipt and CPC2 paths use the shared Supervisor APIs.
-- A deterministic flat installer resource ZIP now packages the actual Supervisor, native Manager installer Lua and icon. It does not auto-load, never rmmod, and blocks retries after uncertain failure. Packaging, native-client protocol handoff, success and Lua failure paths are host-tested. The ZIP still needs the existing device watchface packer; it is not flashable firmware.
-- The P65 Rust target-private feature provides exact VFS/native-UI overrides and a Band11-named compile surface; Bluetooth/L2CAP/SDP and unrecovered methods remain unsupported. All 95 Band11 public function names are covered as implementations or explicit inherited fallbacks, not as working API parity. P65 host/Thumb and Band11 .155 Thumb regression compile pass.
-- Native artifact verifier reports zero undefined imports, no ctor/dtor arrays and only exact-target permitted relocations. Host and ASan/UBSan tests pass. General testing separately finds stale checked-in Band10 .043 Rust generation and three Band11 installer errors (missing pinned host luac and unreviewed errno_location metadata); those files were not changed by this port. Do not claim the complete workspace test suite passes. See `targets/xiaomi-p65-3.100.043/experimental.md` for limits and usage.
-
-## P65 registry file-I/O integration follow-up
-
-- Added normalized, injected open/size/read/write/close glue to the existing P65 dual-slot registry. It supports short transfers, rejects stalled/invalid transfers, propagates close errors, bounds oversized reads, and distinguishes absent slots from I/O failures. Host tests cover round trips, inactive-slot failure fallback, configuration validation, and file-operation failure cleanup. Full host tests, ASan/UBSan, and Cortex-M33 freestanding compilation pass.
-- This is host-implemented integration only: no firmware filesystem addresses, flags, paths, durability semantics, or device capabilities are approved. A firmware-backed provider, bootstrap, UI lifetime, and device loader gates remain unresolved. See the registry file-I/O section in `targets/xiaomi-p65-3.100.043/analysis-report.md`.
-
-## 2026-09-23 P65 module-loader/ABI follow-up
-
-- User-provided read-only P65 console output confirms `help -v insmod` usage (`<file-path> <module-name>`), `help -v rmmod` (`<module-name>`), and an empty `lsmod` listing. The exact command descriptor/name mapping is now recovered through the AP startup data-copy relation; the default help list still omits `insmod` for an unknown reason.
-- Exact P65 IDA tracing recovers NSH `insmod` → ELF loader → section binding/ARM relocation → module registry, plus name-based `rmmod` and `lsmod`. Startup copies cached-XIP `[0x2C0EFDC4,0x2C4C1E44)` to writable VMA `[0x3C000000,0x3C3D2080)` and zeroes BSS through `0x3C4DF960`; the module-list head starts null and the fixed static-symbol table count at `0x3C3B8FF0` starts at zero. Physical RAM type and post-startup count writes remain unverified; see `EVID-P65-MEMORY-002.json`.
-- The ET_REL initializer receives a pointer to two module-record words (+104 unload callback, +108 context), which `rmmod` later invokes as `callback(context)`. `canopus module new` now reads the target profile; its P65 C scaffold emits a `module_initialize` entry/unload shim and generated linker layout. A host-built artifact has e_entry=1, matches the Thumb function symbol, has zero imports/ctors/dtors and passes the strengthened P65 verifier. The legacy direct `render`/`init_array` path still emits e_entry=0; P65 Rust scaffolding fails closed. The conditional Supervisor entry wrapper also links in a host probe with fake zero platform hooks. The P65 loader profile now constrains verifier relocations to the exact AP modlib switch: both valid host probes pass, while a mutated R_ARM_REL32 record is rejected. This remains static host evidence; it does not validate the P65 Supervisor build, Manager APIs, `/dev/canopus`, or device execution.
-- P65 remains unusable by Canopus Manager: the static export count is zero at startup, generated bindings contain only an identity guard, `canopus-target-private` has no P65 backend, and `build_canopus_supervisor.sh` rejects the target. Exact AP analysis found a null-guarded `app_install` entry candidate at 0x0C2418A8/Thumb 0x0C2418A9 (the apparent STRH at 0x0C2418AC is the second halfword of its preceding BEQ.W), plus launcher/LVX candidates and POSIX-shaped open/close/read/write plus mkdir/stat/rename/unlink/rmdir and directory-iteration APIs; fsync/durable-store semantics remain unproven; an injected host-tested P65 dual-slot registry core adds CRC/read-back fallback but no filesystem binding. P65 launcher signatures differ; its LVX list callback table is tied to the concrete `all_list_view` factory, with key/create/update/count slots and list create/config/finalize, row-class, child-label, text and click-event candidates recovered. A snapshot flattener, owned row storage/event bridge, and injected LVX callback-table adapter are host-tested; firmware widget binding and callback teardown remain open. `packagemanager_app_unregister` (`0x0C2415C0`) walks the `app_install` page_registry via the matching activity-manager release slot; `sub_C241420` appears to recover the record by package-name map key. The teardown pairing is structurally strong; a null-guarded install entry candidate is identified, but public callability remains unresolved; QuickApp removal (`0x0C7EC53C`, registry `0x3C3BF9DC`) is a different registry. Activity-page unregister (`0x0C22212C`) dispatches page callbacks but callback-drain ordering is unknown. A `register_driver` ROM-trampoline candidate is found, but its unregister counterpart remains unresolved. Capabilities remain empty; no device module was loaded. A host-tested P65-local `canopus_client_io_v1` now forwards full CPC2 query payloads in-process without creating `/dev/canopus`; the row adapter owns snapshots and bridges clicks through generation-checked Canopus UI dispatch; a host-tested 40-byte LVX callback-table bridge exercises +96/+100/+104/+112 with fake ops, and a fake Manager controller navigates overview→modules→detail and confirms ENABLE over in-process CPC2. No P65 firmware operations or app/page registration are bound. P65 bootstrap, UI/app lifetime and target filesystem/module hooks are still missing. See `EVID-P65-MANAGER-001.json` and `EVID-P65-MANAGER-002.json`.
-- The separate P65 G0 watchface and its CI/Lua smoke integration were removed at the user's request. P65 work proceeds directly toward an experimental Supervisor/Manager; no G0 face is required or shipped. Historical probe evidence is retained as history only, not as a device pass.

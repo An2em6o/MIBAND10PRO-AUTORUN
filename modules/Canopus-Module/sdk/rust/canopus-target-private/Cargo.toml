@@ -1,8 +1,9 @@
 [package]
 name = "canopus-target-private"
+publish = false
 version = "0.1.0"
 edition = "2024"
-license = "AGPL-3.0"
+license = "AGPL-3.0-only"
 rust-version = "1.85"
 description = "Target-selectable private full-trust firmware bindings"
 
@@ -10,14 +11,10 @@ description = "Target-selectable private full-trust firmware bindings"
 default = ["target-xiaomi-band-10-pro-3-101-036"]
 target-xiaomi-band-10-pro-3-101-036 = ["dep:canopus-target-generated", "canopus-target-generated/target-xiaomi-band-10-pro-3-101-036"]
 target-xiaomi-band-10-pro-3-101-043 = ["dep:canopus-target-generated", "canopus-target-generated/target-xiaomi-band-10-pro-3-101-043"]
-target-xiaomi-band-9-pro-3-1-175 = ["dep:canopus-target-generated", "canopus-target-generated/target-xiaomi-band-9-pro-3-1-175"]
 target-xiaomi-band-11-4-100-139 = ["dep:canopus-target-generated", "canopus-target-generated/target-xiaomi-band-11-4-100-139"]
 target-xiaomi-band-11-4-100-155 = ["dep:canopus-target-generated", "canopus-target-generated/target-xiaomi-band-11-4-100-155"]
-target-xiaomi-band-11-4-100-177 = ["dep:canopus-target-generated", "canopus-target-generated/target-xiaomi-band-11-4-100-177"]
-target-xiaomi-band-9-3-1-32 = ["dep:canopus-target-generated", "canopus-target-generated/target-xiaomi-band-9-3-1-32"]
+target-xiaomi-band-11-4-100-179 = ["dep:canopus-target-generated", "canopus-target-generated/target-xiaomi-band-11-4-100-179"]
 
-# Exact-P65 experimental facade; unsafe call boundaries are not production approval.
-target-xiaomi-p65-3-100-043 = ["dep:canopus-target-generated", "canopus-target-generated/target-xiaomi-p65-3-100-043"]
 
 [dependencies]
 canopus-target-generated = { path = "../canopus-target-generated", optional = true, default-features = false }

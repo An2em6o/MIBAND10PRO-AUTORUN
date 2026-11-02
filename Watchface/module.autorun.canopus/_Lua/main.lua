@@ -1,6 +1,3 @@
--- Project: Watchface/module.autorun.canopus
--- Author: @IKUN_CXKPRO
-
 -- Production Canopus installer for Xiaomi Band 10.
 --
 -- Run performs, in order:
@@ -11,11 +8,13 @@
 --
 -- Autostart (10pro.autorun manager contract, REGISTER.md): the module only
 -- drops a pure-command script into /data/rc.d; the manager owns /data/rc,
--- the anti-brick gate and both safety windows. The 16-byte boot frame below
--- carries the "3PC1" delayed-queue (DQ) trigger implemented in the
--- supervisor (3.101.043 builds): the rc script's `dd` only arms a UI-task
--- lv_timer inside the module, so the registration chain never runs in the
--- sh task. Gate/sleep/flash policy deliberately absent from this file.
+-- the anti-brick gate and both safety windows. The 36-byte boot frame below
+-- carries a CPC2 CANOPUS_CMD_START_BOOT (25) request — the supervisor's
+-- native delayed start (ADR-CAN-012): the write path only arms a
+-- foreground LVGL-owner heartbeat (one stage per second); the shell write
+-- only arms it, so the registration chain never runs in the sh task. The old
+-- CPC1 "3PC1" DQ patch is gone — command 25 now uses the same owner context.
+-- Gate/sleep/flash policy deliberately absent from this file.
 
 local lvgl = require("lvgl")
 
@@ -29,12 +28,15 @@ local MANAGER_ICON_PATH = "/data/canopus/manager_icon.bin"
 local DEVICE_PATH = "/dev/canopus"
 local MODULE_MIN_SIZE = 512
 local MODULE_MAX_SIZE = 262144
-local STATUS_SIZE = 384
-local EXPECTED_MAGIC = 0x43505331 -- "CPS1"
-local EXPECTED_CMD_MAGIC = 0x43504331 -- "CPC1"
-local CMD_INSTALL = 0x43510002
-local CMD_RESTORE_AFTER_BOOT = 0x4351000A
+local CPC2_MAGIC = 0x43504332
+local CPC2_HEADER = 36
+local CPC2_ABI_MAJOR = 2
+local CMD_QUERY_DEVICE = 9
+local CMD_INSTALL = 13           -- NATIVE_STAGE: payload-free INSTALL stages 0..2
+local CMD_RESTORE_AFTER_BOOT = 14
+local CMD_START_BOOT = 25        -- arms the supervisor's foreground boot sequence
 local RESULT_COMPLETED = 5
+local request_id = 0
 
 -- Boot-autorun surfaces. Everything lives under the module's own /data/canopus
 -- directory; /data/rc.d is the manager's territory and is only probed, never
@@ -46,8 +48,8 @@ local AUTOSTART_SCRIPT = RC_DIR .. "/canopus.sh"
 local CANOPUS_DIR = "/data/canopus"
 local STAGED_MODULE_PATH = CANOPUS_DIR .. "/canopus_supervisor.bin"
 local BOOT_FRAME_PATH = CANOPUS_DIR .. "/boot.bin"
+local BOOT_REPLY_PATH = CANOPUS_DIR .. "/boot_reply.bin"
 local AUTOSTART_LOG = CANOPUS_DIR .. "/autostart.log"
-local CMD_BOOT_DQ = 0x31435033 -- "3PC1" (supervisor delayed-queue trigger)
 local LEGACY_RC_HOP = "sh /data/canopus/rc &" -- pre-manager era; must not stay
 
 local status
@@ -167,193 +169,68 @@ local function stage_manager_icon()
     return true
 end
 
-local function bytes_to_words(content)
-    if type(content) ~= "string" or #content ~= STATUS_SIZE then return nil end
-    local words = {}
-    for offset = 1, STATUS_SIZE, 4 do
-        local a, b, c, d = content:byte(offset, offset + 3)
-        words[#words + 1] = a + b * 0x100 + c * 0x10000 + d * 0x1000000
-    end
-    return words
-end
-
 local function signed32(value)
     if value >= 0x80000000 then return value - 0x100000000 end
     return value
 end
 
-local function read_status()
-    local file = io.open(DEVICE_PATH, "rb")
-    if not file then return nil, "cannot open /dev/canopus" end
-    local raw = file:read(STATUS_SIZE)
-    file:close()
-    local words = bytes_to_words(raw)
-    if not words or words[1] ~= EXPECTED_MAGIC then
-        return nil, "supervisor status ABI mismatch"
-    end
-    if words[2] ~= 1 then return nil, "supervisor ABI is not version 1" end
-    if words[10] ~= words[11] or words[10] % 2 ~= 0 then
-        return nil, "supervisor status snapshot is inconsistent"
-    end
-    return {
-        pending_op = words[6],
-        pending_state = words[7],
-        error_code = signed32(words[9]),
-    }
+local function u32le(raw, offset)
+    return (string.unpack("<I4", raw, offset + 1))
 end
 
-local function word(value)
-    value = math.floor(value)
-    return string.char(value % 0x100, math.floor(value / 0x100) % 0x100,
-        math.floor(value / 0x10000) % 0x100,
-        math.floor(value / 0x1000000) % 0x100)
-end
-
--- ---- boot autorun (10pro.autorun manager contract) --------------------
--- Files-only registration: every write is /data-only and reversible, so
--- there is no two-stage arming here. The manager owns /data/rc, the gate
--- and both safety windows; this file never touches them (REGISTER.md).
-
-local function write_file(path, content)
-    local file = io.open(path, "wb")
-    if not file then return false, "cannot open " .. path end
-    local write_ok, write_result = pcall(file.write, file, content)
-    local close_ok, close_result = pcall(file.close, file)
-    if not write_ok or write_result == nil
-        or not close_ok or close_result == nil then
-        return false, "write failed: " .. path
-    end
-    if read_all(path, "rb") ~= content then
-        return false, "verification failed: " .. path
-    end
-    return true
-end
-
--- Probe for the manager's rc.d directory. Test-writes a probe file instead
--- of checking directory existence: on NuttX io.open on a directory yields
--- nil even when the directory exists. A missing /data/rc.d means the
--- 10pro.autorun manager is not installed, and per contract not a single
--- byte is written anywhere else.
-local function rc_dir_ready()
-    local probe = RC_DIR .. "/.probe"
-    if write_file(probe, "probe") then
-        run("rm -f " .. shell_quote(probe))
-        return true
-    end
-    if write_file("/data/.probe", "probe") then
-        run("rm -f /data/.probe")
-        return false, "manager missing: no /data/rc.d"
-    end
-    return false, "/data not writable"
-end
-
--- Copy the exact-firmware supervisor resource to a fixed name under
--- /data/canopus: the boot script insmods this copy because it cannot see
--- inside the watchface container. Idempotent; verified by readback.
-local function stage_module_to_data()
-    local content = read_all(MODULE_PATH, "rb")
-    if type(content) ~= "string" or #content < MODULE_MIN_SIZE then
-        return false, "cannot read supervisor resource"
-    end
-    return write_file(STAGED_MODULE_PATH, content)
-end
-
--- 16-byte delayed-queue trigger frame: magic "CPC1" + opcode "3PC1".
--- Printable ASCII by design so the staged file can be eyeball-verified.
-local function build_boot_frame()
-    local payload = word(EXPECTED_CMD_MAGIC) .. word(CMD_BOOT_DQ)
-        .. word(0) .. word(0)
-    return write_file(BOOT_FRAME_PATH, payload)
-end
-
--- The boot script is pure commands (REGISTER.md v0.6.6): no gate, no sleep,
--- no /data/rc access, no flash. The manager's generated /data/rc provides
--- the anti-brick gate and both safety windows around this line.
-local function build_canopus_sh()
-    local lines = {
-        "set +e",
-        "echo start > " .. AUTOSTART_LOG,
-        "insmod " .. STAGED_MODULE_PATH .. " " .. MODULE_NAME,
-        "echo insmod >> " .. AUTOSTART_LOG,
-        "dd if=" .. DEVICE_PATH .. " of=" .. CANOPUS_DIR
-            .. "/stage1.bin bs=384 count=1 conv=notrunc",
-        "dd if=" .. BOOT_FRAME_PATH .. " of=" .. DEVICE_PATH
-            .. " bs=16 count=1 conv=notrunc",
-        "echo boot_cmd_sent >> " .. AUTOSTART_LOG,
-        "dd if=" .. DEVICE_PATH .. " of=" .. CANOPUS_DIR
-            .. "/stage2.bin bs=384 count=1 conv=notrunc",
-        "echo done >> " .. AUTOSTART_LOG,
-    }
-    return write_file(AUTOSTART_SCRIPT, table.concat(lines, "\n") .. "\n")
-end
-
--- Remove this module's legacy two-hop line from /data/rc, if a pre-manager
--- era build ever wrote one. Line-filtered: only the exact match is dropped,
--- every other byte of /data/rc is preserved verbatim.
-local function legacy_cleanup()
-    local current = read_all(RC_PATH, "r")
-    if type(current) ~= "string" then return true end
-    local kept = {}
-    local changed = false
-    for line in (current .. "\n"):gmatch("(.-)\n") do
-        if line == LEGACY_RC_HOP then
-            changed = true
-        else
-            kept[#kept + 1] = line
-        end
-    end
-    if not changed then return true end
-    return write_file(RC_PATH, table.concat(kept, "\n") .. "\n")
-end
-
-local function autostart_install()
-    local ready, ready_error = rc_dir_ready()
-    if not ready then return false, ready_error end
-    local icon_ok, icon_error = stage_manager_icon()
-    if not icon_ok then return false, icon_error end
-    local module_ok, module_error = stage_module_to_data()
-    if not module_ok then return false, module_error end
-    local frame_ok, frame_error = build_boot_frame()
-    if not frame_ok then return false, frame_error end
-    local script_ok, script_error = build_canopus_sh()
-    if not script_ok then return false, script_error end
-    legacy_cleanup()
-    return true
-end
-
-local function autostart_remove()
-    run("rm -f " .. shell_quote(AUTOSTART_SCRIPT))
-    run("rm -f " .. shell_quote(BOOT_FRAME_PATH))
-    -- keep canopus_supervisor.bin / manager_icon.bin: the Manager app
-    -- itself depends on them; autostart removal must not break it
-    legacy_cleanup()
-    return true
-end
-
-local function write_command(command, arg0)
-    local payload = word(EXPECTED_CMD_MAGIC) .. word(command)
-        .. word(arg0 or 0) .. word(0)
+-- One CPC2 request and its reply, kept together: /dev/canopus has a shared
+-- result mailbox, so nothing may yield between the write and the read.
+local function exchange(command, payload, reply_size)
+    payload = payload or ""
+    request_id = request_id + 1
+    local request = string.pack("<I4I2I2I2I2I4I4I4I4I4I4", CPC2_MAGIC, CPC2_HEADER,
+        1, CPC2_ABI_MAJOR, 0, CPC2_HEADER + #payload, command, request_id, 0, 0, #payload) .. payload
     local file = io.open(DEVICE_PATH, "wb")
-    if not file then return false, "cannot open /dev/canopus" end
-    local write_ok, write_result, write_error = pcall(file.write, file, payload)
-    local close_ok, close_result, close_error = pcall(file.close, file)
-    if not write_ok or write_result == nil then
-        return false, tostring(write_error or write_result or "write failed")
+    if not file then return nil, "cannot open /dev/canopus" end
+    local write_ok, write_result, write_error = pcall(file.write, file, request)
+    -- Closing a character device only reports libc's close status and returns
+    -- no value here, so it carries no protocol meaning. The reply check below
+    -- is what decides whether the request landed.
+    pcall(file.close, file)
+    if not write_ok then return nil, "write: " .. tostring(write_error) end
+    if write_result == nil then
+        return nil, "write: " .. tostring(write_error or "rejected")
     end
-    if not close_ok or close_result == nil then
-        return false, tostring(close_error or close_result or "close failed")
+    file = io.open(DEVICE_PATH, "rb")
+    if not file then return nil, "cannot open /dev/canopus" end
+    local reply = file:read(reply_size)
+    file:close()
+    if type(reply) ~= "string" or #reply ~= reply_size
+        or u32le(reply, 0) ~= CPC2_MAGIC or u32le(reply, 16) ~= command
+        or u32le(reply, 20) ~= request_id then
+        return nil, string.format("supervisor reply ABI mismatch (want %d, got %s)",
+            reply_size, type(reply) == "string" and #reply or type(reply))
     end
-    return true
+    return reply
 end
+
+local function device_error()
+    local reply = exchange(CMD_QUERY_DEVICE, nil, CPC2_HEADER + 88)
+    return reply and signed32(u32le(reply, CPC2_HEADER + 24)) or 0
+end
+
+local ERROR_HINTS = {
+    [-21] = "内存不足：模块镜像过大，请缩小模块体积",
+    [-22] = "模块启动失败，已自动回退到上一版本",
+    [-25] = "模块连续崩溃，已被安全隔离并停用",
+    [-11] = "注册表数据异常，已自动保护",
+    [-6]  = "模块加载失败，请检查模块与设备固件是否兼容",
+}
 
 local function execute_step(command, arg0)
-    local ok, message = write_command(command, arg0)
-    if not ok then return false, message end
-    local current, status_error = read_status()
-    if not current then return false, status_error end
-    if current.pending_op ~= command or current.pending_state ~= RESULT_COMPLETED then
-        return false, string.format("result=%d error=%d",
-            current.pending_state, current.error_code)
+    local reply, message = exchange(command,
+        command == CMD_INSTALL and string.pack("<I4", arg0 or 0) or nil, CPC2_HEADER)
+    if not reply then return false, message end
+    local result = u32le(reply, 28)
+    if result ~= RESULT_COMPLETED then
+        local err = device_error()
+        local hint = ERROR_HINTS[err]
+        return false, string.format("result=%d error=%d%s", result, err, hint and ("\n" .. hint) or "")
     end
     return true
 end
@@ -436,6 +313,132 @@ local function start_run_timer()
     run_timer = created
     created:resume()
     created:ready()
+    return true
+end
+
+-- ---- boot autorun (10pro.autorun manager contract) --------------------
+-- Files-only registration: every write is /data-only and reversible, so
+-- there is no two-stage arming here. The manager owns /data/rc, the gate
+-- and both safety windows; this file never touches them (REGISTER.md).
+
+local function write_file(path, content)
+    local file = io.open(path, "wb")
+    if not file then return false, "cannot open " .. path end
+    local write_ok, write_result = pcall(file.write, file, content)
+    local close_ok, close_result = pcall(file.close, file)
+    if not write_ok or write_result == nil
+        or not close_ok or close_result == nil then
+        return false, "write failed: " .. path
+    end
+    if read_all(path, "rb") ~= content then
+        return false, "verification failed: " .. path
+    end
+    return true
+end
+
+-- Probe for the manager's rc.d directory. Test-writes a probe file instead
+-- of checking directory existence: on NuttX io.open on a directory yields
+-- nil even when the directory exists. A missing /data/rc.d means the
+-- 10pro.autorun manager is not installed, and per contract not a single
+-- byte is written anywhere else.
+local function rc_dir_ready()
+    local probe = RC_DIR .. "/.probe"
+    if write_file(probe, "probe") then
+        run("rm -f " .. shell_quote(probe))
+        return true
+    end
+    if write_file("/data/.probe", "probe") then
+        run("rm -f /data/.probe")
+        return false, "manager missing: no /data/rc.d"
+    end
+    return false, "/data not writable"
+end
+
+-- Copy the exact-firmware supervisor resource to a fixed name under
+-- /data/canopus: the boot script insmods this copy because it cannot see
+-- inside the watchface container. Idempotent; verified by readback.
+local function stage_module_to_data()
+    local content = read_all(MODULE_PATH, "rb")
+    if type(content) ~= "string" or #content < MODULE_MIN_SIZE then
+        return false, "cannot read supervisor resource"
+    end
+    return write_file(STAGED_MODULE_PATH, content)
+end
+
+-- 36-byte CPC2 CANOPUS_CMD_START_BOOT request, byte-identical to what the
+-- upstream pinned-start boot.lua sends: the write only arms the supervisor's
+-- foreground LVGL-owner state machine (one stage per second), never runs the
+-- registration chain in the caller's shell task. Screen-off pauses the LVGL
+-- heartbeat until the owner resumes. request_id is 1 because the boot branch never touches
+-- the pending-request table.
+local function build_boot_frame()
+    local payload = string.pack("<I4I2I2I2I2I4I4I4I4I4I4",
+        CPC2_MAGIC, CPC2_HEADER, 1, CPC2_ABI_MAJOR, 0, CPC2_HEADER,
+        CMD_START_BOOT, 1, 0, 0, 0)
+    return write_file(BOOT_FRAME_PATH, payload)
+end
+
+-- The boot script is pure commands (REGISTER.md v0.6.6): no gate, no sleep,
+-- no /data/rc access, no flash. The manager's generated /data/rc provides
+-- the anti-brick gate and both safety windows around this line. There is no
+-- pre-write status read: the CPC2 mailbox only exists after the first write.
+-- The post-write 36-byte readback is the START_BOOT response (result=5).
+local function build_canopus_sh()
+    local lines = {
+        "set +e",
+        "echo start > " .. AUTOSTART_LOG,
+        "insmod " .. STAGED_MODULE_PATH .. " " .. MODULE_NAME,
+        "echo insmod >> " .. AUTOSTART_LOG,
+        "dd if=" .. BOOT_FRAME_PATH .. " of=" .. DEVICE_PATH
+            .. " bs=36 count=1 conv=notrunc",
+        "echo boot_cmd_sent >> " .. AUTOSTART_LOG,
+        "dd if=" .. DEVICE_PATH .. " of=" .. BOOT_REPLY_PATH
+            .. " bs=36 count=1 conv=notrunc",
+        "echo done >> " .. AUTOSTART_LOG,
+    }
+    return write_file(AUTOSTART_SCRIPT, table.concat(lines, "\n") .. "\n")
+end
+
+-- Remove this module's legacy two-hop line from /data/rc, if a pre-manager
+-- era build ever wrote one. Line-filtered: only the exact match is dropped,
+-- every other byte of /data/rc is preserved verbatim.
+local function legacy_cleanup()
+    local current = read_all(RC_PATH, "r")
+    if type(current) ~= "string" then return true end
+    local kept = {}
+    local changed = false
+    for line in (current .. "\n"):gmatch("(.-)\n") do
+        if line == LEGACY_RC_HOP then
+            changed = true
+        else
+            kept[#kept + 1] = line
+        end
+    end
+    if not changed then return true end
+    return write_file(RC_PATH, table.concat(kept, "\n") .. "\n")
+end
+
+local function autostart_install()
+    local ready, ready_error = rc_dir_ready()
+    if not ready then return false, ready_error end
+    local icon_ok, icon_error = stage_manager_icon()
+    if not icon_ok then return false, icon_error end
+    local module_ok, module_error = stage_module_to_data()
+    if not module_ok then return false, module_error end
+    local frame_ok, frame_error = build_boot_frame()
+    if not frame_ok then return false, frame_error end
+    local script_ok, script_error = build_canopus_sh()
+    if not script_ok then return false, script_error end
+    return legacy_cleanup()
+end
+
+local function autostart_remove()
+    run("rm -f " .. shell_quote(AUTOSTART_SCRIPT))
+    run("rm -f " .. shell_quote(BOOT_FRAME_PATH))
+    run("rm -f " .. shell_quote(BOOT_REPLY_PATH))
+    -- keep canopus_supervisor.bin / manager_icon.bin: the Manager app
+    -- itself depends on them; autostart removal must not break it
+    legacy_cleanup()
     return true
 end
 
@@ -523,8 +526,11 @@ end)
 make_button("Autostart Install", -68, 0x1F5C2A, function()
     local ok, message = autostart_install()
     if ok then
-        set_status("Autostart staged: rc.d/canopus.sh"
-            .. "\nRebuild /data/rc in Manager", 0x8FF0A4)
+        -- Registering a script does not reopen the manager's anti-brick gate.
+        local gate_on = read_all(RC_DIR .. "/.autorun.on", "rb") ~= nil
+        set_status("Autostart files updated\n"
+            .. (gate_on and "Manager: [2 Apply]"
+                or "Manager: [3 Enable] + [2 Apply]"), 0x8FF0A4)
     else
         set_status("Autostart failed: " .. tostring(message), 0xFF9A9A)
     end

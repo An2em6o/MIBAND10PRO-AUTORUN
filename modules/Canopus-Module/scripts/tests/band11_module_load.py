@@ -15,6 +15,9 @@ it is absent.
     build/band11-tests/bin/python scripts/tests/band11_module_load.py
 """
 import os
+import sys as _s, pathlib as _p
+_s.path.insert(0, str(_p.Path(__file__).resolve().parent))
+import cpc2
 import pathlib
 import struct
 import sys
@@ -32,7 +35,6 @@ RESTORE_AFTER_BOOT = 0x4351000A
 CMD_MAGIC = 0x43504331
 STATUS_MAGIC = 0x43505331
 INTENT_ENABLED = 1
-SIGNATURE_OK = 1
 
 
 def staged():
@@ -41,7 +43,7 @@ def staged():
     if not receipt_path.is_file():
         return None
     receipt = receipt_path.read_bytes()
-    if len(receipt) != 256 or struct.unpack_from('<I', receipt)[0] != 0x31494D43:
+    if len(receipt) != 176 or struct.unpack_from('<I', receipt)[0] != 0x32494D43:
         return None
     lifecycle, version, artifact_size = struct.unpack_from('<3I', receipt, 16)
     module_id = receipt[32:64].split(b'\0')[0].decode()
@@ -57,7 +59,7 @@ def registry(module_id, lifecycle, version):
     struct.pack_into('<3I', buf, 0, 0x31524443, 1, 1)  # CRD1, version, count
     name = module_id.encode()
     buf[16:16 + len(name)] = name
-    struct.pack_into('<4I', buf, 16 + 32, lifecycle, version, SIGNATURE_OK,
+    struct.pack_into('<4I', buf, 16 + 32, lifecycle, version, 0,
                      INTENT_ENABLED)
     return bytes(buf)
 
@@ -115,10 +117,11 @@ class ModuleLoadTests(unittest.TestCase):
         self.alias_blocks.clear()
 
         frame = 0x200d0000
-        m.uc.mem_write(frame, struct.pack('<4I', CMD_MAGIC, RESTORE_AFTER_BOOT, 0, 0))
+        _req = cpc2.legacy(RESTORE_AFTER_BOOT, 0)
+        m.uc.mem_write(frame, _req)
         m.uc.reg_write(UC_ARM_REG_R1, frame)
-        m.uc.reg_write(UC_ARM_REG_R2, 16)
-        self.assertEqual(m.call(m.word(m.fops + 12)), 16)
+        m.uc.reg_write(UC_ARM_REG_R2, len(_req))
+        self.assertEqual(m.call(m.word(m.fops + 12)), len(_req))
 
         buf = self.status()
         self.assertEqual(m.word(buf + 20), RESTORE_AFTER_BOOT)
@@ -164,10 +167,11 @@ class ModuleLoadTests(unittest.TestCase):
         m.finish_access_monitor()
         m.kernel_largest = 4096
         frame = 0x200d0000
-        m.uc.mem_write(frame, struct.pack('<4I', CMD_MAGIC, RESTORE_AFTER_BOOT, 0, 0))
+        _req = cpc2.legacy(RESTORE_AFTER_BOOT, 0)
+        m.uc.mem_write(frame, _req)
         m.uc.reg_write(UC_ARM_REG_R1, frame)
-        m.uc.reg_write(UC_ARM_REG_R2, 16)
-        self.assertEqual(m.call(m.word(m.fops + 12)), 16)
+        m.uc.reg_write(UC_ARM_REG_R2, len(_req))
+        self.assertEqual(m.call(m.word(m.fops + 12)), len(_req))
         buf = self.status()
         self.assertNotEqual(m.word(buf + 128), 0, 'slot is empty')
         live = {p: n for p, n in m.allocations.items()

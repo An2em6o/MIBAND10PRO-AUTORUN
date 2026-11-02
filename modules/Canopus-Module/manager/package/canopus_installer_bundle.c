@@ -1,16 +1,10 @@
-/* Signed receipt validation shared by host tests and the exact-target platform.
- * Note: the ed25519 signature check was deliberately removed (dev/universal
- * policy) so modules packaged by third parties with their own keys load fine.
- * Structural, target-id and firmware binding checks are kept. */
+/* Receipt validation shared by host tests and the exact-target platform. */
 #include "canopus_installer_bundle.h"
 #include "canopus_runtime.h"
 
 _Static_assert(sizeof(struct canopus_install_receipt_v1) ==
                    CANOPUS_INSTALL_RECEIPT_SIZE,
                "install receipt wire size");
-_Static_assert(__builtin_offsetof(struct canopus_install_receipt_v1, signature) ==
-                   CANOPUS_INSTALL_SIGNED_SIZE,
-               "install receipt signed prefix");
 
 static int bytes_equal(const uint8_t *left, const uint8_t *right, uint32_t size)
 {
@@ -64,10 +58,9 @@ int canopus_install_module_id_valid(
 int canopus_install_receipt_validate(
     const struct canopus_install_receipt_v1 *receipt,
     const char *target_id,
-    const uint8_t firmware_sha256[CANOPUS_INSTALL_DIGEST_SIZE],
-    const uint8_t public_key[32])
+    const uint8_t firmware_sha256[CANOPUS_INSTALL_DIGEST_SIZE])
 {
-    if (receipt == 0 || firmware_sha256 == 0 || public_key == 0 ||
+    if (receipt == 0 || firmware_sha256 == 0 ||
         receipt->magic != CANOPUS_INSTALL_RECEIPT_MAGIC ||
         receipt->version != CANOPUS_INSTALL_RECEIPT_VERSION ||
         receipt->header_size != CANOPUS_INSTALL_RECEIPT_SIZE ||
@@ -82,7 +75,5 @@ int canopus_install_receipt_validate(
                      CANOPUS_INSTALL_DIGEST_SIZE)) {
         return -1;
     }
-    /* crypto_ed25519_check removed on purpose: the receipt signature is no
-     * longer verified, so installs signed by any key are accepted. */
     return 0;
 }

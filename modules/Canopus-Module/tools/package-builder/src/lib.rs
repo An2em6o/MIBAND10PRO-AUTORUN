@@ -1,26 +1,18 @@
-//! canopus-package: deterministic .canopus package assembly and Ed25519
-//! signing (CAN-PKG-001/002/003).
+//! canopus-package: deterministic .canopus package assembly and integrity
+//! verification (CAN-PKG-001/002/003). Packages carry no signature (K9);
+//! integrity is the per-artifact SHA-256 recorded in the manifest.
 //!
 //! Layout inside the tar (deterministic: sorted paths, mtime=0):
 //!   manifest.json           canonical manifest (validated against schema)
 //!   artifacts/<target_id>/module.elf   per-target payload
 //!   reports/elf-verifier.json          verifier output (if provided)
-//!   signature.ed25519                  64-byte signature appended by sign()
-//!
-//! The signature covers sha256(archive) where archive excludes the
-//! signature.ed25519 entry itself, so verify() strips it and re-hashes.
 
 use canopus_core::error::{Error, Result};
-use canopus_core::model::PackageManifest;
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use canopus_core::model::{PackageManifest, PackageResource};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tar::{Builder, EntryType, Header};
-
-pub mod keyroles;
-
-pub const SIGNATURE_ENTRY: &str = "signature.ed25519";
 
 /// Recursively removes `null` object members so an in-memory manifest (with
 /// `None` Options serialized as null) validates like a hand-written one.
@@ -83,6 +75,21 @@ pub fn validate_entry(name: &str, entry_type: &EntryType) -> Result<()> {
     Ok(())
 }
 
+/// Adds an entry; an identical duplicate path is stored once, conflicting
+/// content for one path is an error.
+fn push_entry(entries: &mut Vec<(String, Vec<u8>)>, path: String, bytes: Vec<u8>) -> Result<()> {
+    match entries.iter().find(|(p, _)| *p == path) {
+        Some((_, existing)) if *existing == bytes => Ok(()),
+        Some(_) => Err(Error::other(format!(
+            "package build: conflicting content for '{path}'"
+        ))),
+        None => {
+            entries.push((path, bytes));
+            Ok(())
+        }
+    }
+}
+
 /// Assembles a deterministic tar archive from a manifest and the on-disk
 /// artifacts it references. Verifies each artifact SHA-256 against the
 /// manifest before embedding. `resource_files` maps each declared
@@ -93,6 +100,19 @@ pub fn build_archive(
     manifest: &PackageManifest,
     files: &HashMap<String, PathBuf>, // target_id -> source file
     resource_files: &HashMap<String, PathBuf>, // resource path -> source file
+) -> Result<Vec<u8>> {
+    build_archive_with_receipts(manifest, files, resource_files, &HashMap::new())
+}
+
+/// Like [`build_archive`], plus the per-target install receipts the manifest
+/// declares (`receipt_path` / `receipt_sha256`, keyed by target id). Portable
+/// modules point several targets at one artifact path; identical content is
+/// stored once.
+pub fn build_archive_with_receipts(
+    manifest: &PackageManifest,
+    files: &HashMap<String, PathBuf>,
+    resource_files: &HashMap<String, PathBuf>,
+    receipts: &HashMap<String, Vec<u8>>,
 ) -> Result<Vec<u8>> {
     // CAN-P2-009: the library enforces the package schema itself (not just
     // the CLI), so build and CLI contracts cannot drift apart. Absent
@@ -105,7 +125,7 @@ pub fn build_archive(
     let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
 
     // manifest.json
-    let manifest_bytes = serde_json::to_vec_pretty(manifest)?;
+    let manifest_bytes = serde_json::to_vec_pretty(&value)?;
     entries.push(("manifest.json".to_string(), manifest_bytes));
 
     // per-target artifacts (hash-verified before embedding)
@@ -127,44 +147,66 @@ pub fn build_archive(
                 art.target_id, art.sha256, actual
             )));
         }
-        entries.push((art.path.clone(), bytes));
-    }
-
-    // CAN-P1-013: declared native-app resources (hash-verified, canonical
-    // path). A supplied file that is not declared is rejected so nothing
-    // unverified can ride along in the package.
-    if let Some(resources) = manifest
-        .native_app
-        .as_ref()
-        .and_then(|a| a.resources.as_ref())
-    {
-        for r in resources {
-            validate_entry(&r.path, &EntryType::Regular)?;
-            let src = resource_files.get(&r.path).ok_or_else(|| {
+        push_entry(&mut entries, art.path.clone(), bytes)?;
+        if let (Some(path), Some(sha)) = (&art.receipt_path, &art.receipt_sha256) {
+            validate_entry(path, &EntryType::Regular)?;
+            let receipt = receipts.get(&art.target_id).ok_or_else(|| {
                 Error::other(format!(
-                    "package build: no resource file supplied for declared '{}'",
-                    r.path
+                    "package build: no receipt supplied for target '{}'",
+                    art.target_id
                 ))
             })?;
-            let bytes = std::fs::read(src)
-                .map_err(|e| Error::other(format!("cannot read {}: {e}", src.display())))?;
-            let actual = hex_sha256(&bytes);
-            if !actual.eq_ignore_ascii_case(&r.sha256) {
+            if !hex_sha256(receipt).eq_ignore_ascii_case(sha) {
                 return Err(Error::other(format!(
-                    "package build: resource {} sha256 mismatch (expected {}, got {})",
-                    r.path, r.sha256, actual
+                    "package build: receipt for {} sha256 mismatch",
+                    art.target_id
                 )));
             }
-            entries.push((r.path.clone(), bytes));
+            push_entry(&mut entries, path.clone(), receipt.clone())?;
         }
+    }
+
+    // CAN-P1-013: declared module & native-app resources (hash-verified, canonical
+    // path). A supplied file that is not declared is rejected so nothing
+    // unverified can ride along in the package.
+    let empty_resources = Vec::new();
+    let all_resources: Vec<&PackageResource> = manifest
+        .resources
+        .as_deref()
+        .unwrap_or(&empty_resources)
+        .iter()
+        .chain(
+            manifest
+                .native_app
+                .as_ref()
+                .and_then(|a| a.resources.as_deref())
+                .unwrap_or(&empty_resources)
+                .iter(),
+        )
+        .collect();
+
+    for r in &all_resources {
+        validate_entry(&r.path, &EntryType::Regular)?;
+        let src = resource_files.get(&r.path).ok_or_else(|| {
+            Error::other(format!(
+                "package build: no resource file supplied for declared '{}'",
+                r.path
+            ))
+        })?;
+        let bytes = std::fs::read(src)
+            .map_err(|e| Error::other(format!("cannot read {}: {e}", src.display())))?;
+        let actual = hex_sha256(&bytes);
+        if !actual.eq_ignore_ascii_case(&r.sha256) {
+            return Err(Error::other(format!(
+                "package build: resource {} sha256 mismatch (expected {}, got {})",
+                r.path, r.sha256, actual
+            )));
+        }
+        entries.push((r.path.clone(), bytes));
     }
     // a supplied resource that the manifest does not declare is a reject
     for path in resource_files.keys() {
-        let declared = manifest
-            .native_app
-            .as_ref()
-            .and_then(|a| a.resources.as_ref())
-            .is_some_and(|rs| rs.iter().any(|r| &r.path == path));
+        let declared = all_resources.iter().any(|r| &r.path == path);
         if !declared {
             return Err(Error::other(format!(
                 "package build: resource file '{path}' not declared in the manifest"
@@ -172,27 +214,6 @@ pub fn build_archive(
         }
     }
 
-    write_tar(&entries)
-}
-
-/// Appends a signature.ed25519 entry over the canonical digest of the
-/// archive's entries (sorted path+content, signature excluded) and returns
-/// the new archive.
-pub fn sign_archive(archive: &[u8], secret_key_hex: &str) -> Result<Vec<u8>> {
-    let secret = hex::decode(secret_key_hex.trim())
-        .map_err(|_| Error::other("secret key is not valid hex"))?;
-    let secret: [u8; 32] = secret
-        .as_slice()
-        .try_into()
-        .map_err(|_| Error::other("secret key must be 32 bytes"))?;
-    let signing = SigningKey::from_bytes(&secret);
-
-    let mut entries = read_tar(archive)?;
-    let digest = canonical_digest(&entries);
-    let sig = signing.sign(&digest);
-    let sig_bytes = sig.to_bytes();
-
-    entries.push((SIGNATURE_ENTRY.to_string(), sig_bytes.to_vec()));
     write_tar(&entries)
 }
 
@@ -212,6 +233,14 @@ pub fn manifest_with_real_hashes(
             art.sha256 = hex_sha256(&bytes);
         }
     }
+    if let Some(resources) = m.resources.as_mut() {
+        for r in resources {
+            if let Some(src) = resource_files.get(&r.path) {
+                let bytes = std::fs::read(src)?;
+                r.sha256 = hex_sha256(&bytes);
+            }
+        }
+    }
     if let Some(resources) = m.native_app.as_mut().and_then(|a| a.resources.as_mut()) {
         for r in resources {
             if let Some(src) = resource_files.get(&r.path) {
@@ -223,67 +252,58 @@ pub fn manifest_with_real_hashes(
     Ok(m)
 }
 
-/// Verifies a signed archive against a public key. The signature entry is
-/// stripped, the remaining payload is re-hashed, and the Ed25519 signature
-/// is checked.
-pub fn verify_archive(archive: &[u8], public_key_hex: &str) -> Result<()> {
-    let pub_bytes = hex::decode(public_key_hex.trim())
-        .map_err(|_| Error::other("public key is not valid hex"))?;
-    let vk = VerifyingKey::from_bytes(
-        pub_bytes
-            .as_slice()
-            .try_into()
-            .map_err(|_| Error::other("public key must be 32 bytes"))?,
-    )
-    .map_err(|e| Error::other(format!("bad public key: {e}")))?;
-
-    let entries = read_tar(archive)?;
-    let mut sig: Option<Vec<u8>> = None;
-    for (name, bytes) in &entries {
-        if name == SIGNATURE_ENTRY {
-            sig = Some(bytes.clone());
+/// Verifies archive structure and integrity: canonical entry paths, a schema-valid
+/// manifest, and every declared artifact and resource present with its recorded
+/// SHA-256.
+pub fn verify_archive(archive: &[u8]) -> Result<PackageManifest> {
+    let entries: HashMap<String, Vec<u8>> = read_tar(archive)?.into_iter().collect();
+    let manifest_bytes = entries
+        .get("manifest.json")
+        .ok_or_else(|| Error::other("package has no manifest.json entry"))?;
+    let value: serde_json::Value = serde_json::from_slice(manifest_bytes)?;
+    canopus_core::schema::validate(canopus_core::schema::SchemaKind::Package, &value)?;
+    let manifest: PackageManifest = serde_json::from_value(value)?;
+    let declared = manifest
+        .artifacts
+        .iter()
+        .map(|a| (&a.path, &a.sha256))
+        .chain(
+            manifest
+                .artifacts
+                .iter()
+                .filter_map(|a| a.receipt_path.as_ref().zip(a.receipt_sha256.as_ref())),
+        )
+        .chain(
+            manifest
+                .resources
+                .iter()
+                .flatten()
+                .map(|r| (&r.path, &r.sha256)),
+        )
+        .chain(
+            manifest
+                .native_app
+                .iter()
+                .filter_map(|a| a.resources.as_ref())
+                .flatten()
+                .map(|r| (&r.path, &r.sha256)),
+        );
+    for (path, sha256) in declared {
+        let bytes = entries
+            .get(path)
+            .ok_or_else(|| Error::other(format!("package is missing '{path}'")))?;
+        if !hex_sha256(bytes).eq_ignore_ascii_case(sha256) {
+            return Err(Error::other(format!(
+                "package entry '{path}' sha256 mismatch"
+            )));
         }
     }
-    let sig_bytes = sig.ok_or_else(|| Error::other("package has no signature.ed25519 entry"))?;
-    let sig = Signature::from_bytes(
-        sig_bytes
-            .as_slice()
-            .try_into()
-            .map_err(|_| Error::other("signature must be 64 bytes"))?,
-    );
-
-    let digest = canonical_digest(&entries);
-    vk.verify(&digest, &sig)
-        .map_err(|_| Error::other("Ed25519 signature verification FAILED"))
-}
-
-/// sha256 over a framed, versioned canonical form of every entry except the
-/// signature, sorted by path. CAN-P2-008: the digest is self-describing —
-/// a domain/version prefix and explicit u64 name/content length framing — so
-/// a future format change produces a distinct domain or bumps the version
-/// instead of silently reinterpreting old digests. Binding path to content
-/// makes it independent of tar encoding details.
-fn canonical_digest(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
-    let mut sorted: Vec<&(String, Vec<u8>)> = entries
-        .iter()
-        .filter(|(n, _)| n != SIGNATURE_ENTRY)
-        .collect();
-    sorted.sort_by(|a, b| a.0.cmp(&b.0));
-    let mut h = Sha256::new();
-    h.update(b"canopus.package.digest.v1\0");
-    for (name, bytes) in sorted {
-        h.update((name.len() as u64).to_le_bytes());
-        h.update(name.as_bytes());
-        h.update((bytes.len() as u64).to_le_bytes());
-        h.update(bytes);
-    }
-    h.finalize().to_vec()
+    Ok(manifest)
 }
 
 /// Parses a tar into sorted (path, bytes) entries. Every entry is validated
 /// against the canonical path rules and duplicates are rejected (so a
-/// signature over the archive can never be fooled by "one path verified,
-/// another unpacked").
+/// archive can never be fooled by "one path verified, another unpacked").
 fn read_tar(archive: &[u8]) -> Result<Vec<(String, Vec<u8>)>> {
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -326,17 +346,6 @@ fn write_tar(entries: &[(String, Vec<u8>)]) -> Result<Vec<u8>> {
         b.finish()?;
     }
     Ok(data)
-}
-
-/// Generates a fresh Ed25519 key pair from OS entropy.
-pub fn keygen() -> Result<(String, String)> {
-    let mut seed = [0u8; 32];
-    getrandom::getrandom(&mut seed)
-        .map_err(|e| Error::other(format!("entropy source failed: {e}")))?;
-    let signing = SigningKey::from_bytes(&seed);
-    let secret = hex::encode(signing.to_bytes());
-    let public = hex::encode(signing.verifying_key().to_bytes());
-    Ok((secret, public))
 }
 
 fn sha256(data: &[u8]) -> Vec<u8> {

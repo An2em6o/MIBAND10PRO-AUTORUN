@@ -1,9 +1,12 @@
 # Canopus 原生 Manager、正式 Transport 与原生 UI SDK 实施设计
 
+> **归档提示（2026-10-14）：** 能力状态表（§15）仍有效；其余设计以 [`refactor-plan.md`](refactor-plan.md) 与 ADR 为准。
+> **当前接口变更：** Toast API 已按用户要求移除，原节点编号 11 与能力位 16 停用；本文的 Toast 设计仅作历史保留，不代表当前可用能力。
+
 > 文档状态：Proposed v1  
 > 日期：2026-08-05  
 > 初始目标：`xiaomi-band-10-pro-3.101.030`  
-> 依赖：[architecture.md](architecture.md) §10、§14–17、§19–20  
+> 依赖：[architecture.md](archive/architecture.md) §10、§14–17、§19–20  
 > 目标：把当前 bootstrap 原型推进为可从 launcher 启动、可真实管理外部模块的原生 Manager，并提供面向 C 与 Rust 的人类可读原生 UI SDK。
 
 ---
@@ -288,6 +291,15 @@ bootstrap installer loads trusted supervisor artifact once
 - 若无法证明同步注销：Manager module 为 always-resident，更新和删除仅在 reboot 边界生效。
 
 在 app registration、lifecycle callback、router ownership 和 descriptor lifetime 全部通过真机 gate 前，不调用“安装原生应用完成”。
+
+显式 `ACTIVATE` 成功后，Supervisor 将模块的原生应用发布加入前台 UI heartbeat：
+第一轮调用 `publish_native_app_stage(ctx, 1)` 注册应用与页面，下一轮调用 stage 2 发布启动器入口。
+每轮只推进一个模块的一步，并让已开始的启动器更新先完成；模块自己的 `ui->post` 槽位保持独立。
+后台 heartbeat、`sleep_ms` 和命令处理栈不会执行这组发布回调。发布失败记录模块的
+`activation_error` 并停止后续阶段；发布前禁用或移除模块会取消尚未执行的阶段。
+旧版单回调模块仍只在第一阶段调用 `publish_native_app`。`ENABLE` 继续表示下次启动启用，
+本次立即运行仍使用 `ACTIVATE`；启动恢复沿用安装器的分阶段发布流程。此流程的验证状态仅为 host，
+不提升任何 exact-target 的真机批准状态。
 
 ---
 
@@ -800,8 +812,8 @@ Gate：所有 security/device gates 通过后，才能将 native app/UI SDK 标�
 | B | PARTIAL / DEVICE-PENDING | Manager host model 已按 request/pending/safe-mode 约束消费 supervisor 语义，生产能力不会因 host fake 自动提升 | 目标设备上的 `/dev/canopus` v2 client、页面重开后的 operation 恢复及只读 recovery 协商仍缺 |
 | C | HOST-FIXED / DEVICE-PENDING | package canonicalization/signature/verifier、slot transaction/recovery、lifecycle transition 与 hostile-input host tests 已覆盖主要不变量 | device verifier、真实 stage/load/unload、stop/drain、持久 safe mode、fault-injected 真机 package store 尚未通过 |
 | D | BLOCKED-EVIDENCE | launcher ordered-list 与 descriptor 的静态记录、最小注册相关证据已保留 | registration/unregistration、page factory、dispatcher、callback ownership 与 100-cycle/reboot gate 未证明；相关 veneer 继续 restricted |
-| E | PARTIAL / STATIC-ONLY | 公共 semantic catalog 已覆盖 21 种节点类型（含 `NavigationHeader`）；目标已知函数建立 60 条 canonical exact-target 特征码，2 条缺入口记录保持 unresolved；普通 App 的 stock `lvx_page_title_create`、固定 Header 下方 content root、sport-private titlebar、AIOTJS Router 与 MiSans-Demibold 32px 标题样式边界已记录到 `EVID-UI-001`/`EVID-UI-003`/`EVID-NAV-002` | semantic 节点不等于已 device-approved 的固件 prefab。仍需 tokens/resources/localization、多路径 completeness review 与逐组件 device probe；特征码目前也不是跨版本证明 |
-| F | HOST-FIXED / DEVICE-PENDING | C ABI 1.4 已实现 bounded tree/string arena、stable key、transactional commit、generation event、host fake、builder/macros、ABI 1.3 append-only style/layout/value metadata、backend minor capability negotiation、ABI 1.4 semantic `NavigationHeader` 与 generation-safe bounded Router；21 种语义组件通过 host tests | exact-target native renderer/backend、UI-thread/lifecycle device proof 尚缺 |
+| E | PARTIAL / STATIC-ONLY | 公共 semantic catalog 已覆盖 20 种有效节点类型（含 `NavigationHeader`，17 号 slider 已退役）；目标已知函数建立 60 条 canonical exact-target 特征码，2 条缺入口记录保持 unresolved；普通 App 的 stock `lvx_page_title_create`、固定 Header 下方 content root、sport-private titlebar、AIOTJS Router 与 MiSans-Demibold 32px 标题样式边界已记录到 `EVID-UI-001`/`EVID-UI-003`/`EVID-NAV-002` | semantic 节点不等于已 device-approved 的固件 prefab。仍需 tokens/resources/localization、多路径 completeness review 与逐组件 device probe；特征码目前也不是跨版本证明 |
+| F | HOST-FIXED / DEVICE-PENDING | C UI ABI 2.0 已实现 bounded tree/string arena、stable key、transactional commit、generation event、host fake、builder/macros、style/layout/value/visual metadata、显式 backend capability negotiation、semantic `NavigationHeader` 与 generation-safe bounded Router；20 种有效语义组件（17 号 slider 已退役）通过 host tests，ABI 2.0 细节见 ADR-CAN-013 | exact-target native renderer/backend、UI-thread/lifecycle device proof 尚缺 |
 | G | PARTIAL / HOST-FIXED | `canopus-ui-core` 为 `no_std`；C ABI 镜像、可借用 model text 的 `View`/`view!`/`SystemComponent`、fluent semantic/style/layout modifiers、`NavigationHeader`、`Router<Route, DEPTH>`、`State`/`Binding`/`BoundedList`/`CommandQueue`、`CAbiBackend` 与 `ApplicationRuntime` 已通过 host 和 compile-fail doctests；runtime 已完成 checked event→typed Message→update→bounded command drain→generation rebuild→transactional backend publish | 完整 C/Rust catalog byte-equivalence、exact-target Header/page backend device proof，以及计划中的可选 crate split 尚缺 |
 | H | PARTIAL / DEVICE-PENDING | Manager 已有按“品牌标题→框架/Manager/固件/构建/目标元数据→管理入口”组织的 Overview，以及独立 Modules、Detail 和 confirmation 语义页面；Safe Mode 保留为 supervisor policy state 而不再暴露误导性单向开关；exact-target backend 现在以 static-recovered `lvx_page_title_create` 创建 stock 左标题、右侧时间和 Modules/Detail back affordance，并采用 Settings 同款 336x424 content root 从 y=56 开始，使 Header 留在内容滚动区域之外；页面 pause、forward route 与 header-back 会停用 source callbacks，避免转场期间重复事件 | Header callback/teardown、固定 Header 的真实滚动行为、标题与正文 inset、标题字号/裁切、正常 push/pop 动画参数及完整 install→rollback→remove device flow 仍需真机闭环 |
 | I | PARTIAL | schema/evidence/codegen/CI gates、bounded diagnostics、package/ELF hostile-input tests及文档状态检查已有覆盖 | node caller boundary、完整 signer/revocation UI、resource-exhaustion/fuzz/long-run/watchdog/device compatibility matrix 与迁移恢复闭环仍缺 |
@@ -920,9 +932,9 @@ Gate：所有 security/device gates 通过后，才能将 native app/UI SDK 标�
 | CAN-P0-001 | P0 | CLOSED-GATED | `/dev/canopus` write 返回 0 导致 Lua/stdio 无进展重试和 watchdog reboot | `manager/service/canopus_supervisor_platform.c:41-45` |
 | CAN-P0-002 | P0 | HOST-FIXED/DEVICE-PENDING | Manager bounded text renderer 在截断后发生整数/指针下溢，可写到 buffer 前方 | `manager/ui/canopus_manager.c:89-174` |
 | CAN-P0-003 | P0 | HOST-FIXED/DEVICE-PENDING | device INSTALL 未接验签、target/hash/verifier，包路径与归档 entry 未形成安全边界 | `manager/service/canopus_supervisor.c:86-97`、`tools/package-builder/src/lib.rs:28-186` |
-| CAN-P0-004 | P0 | OPEN | device stage/load/unload 全为 stub，无法真实管理模块 | `manager/service/canopus_supervisor_platform.c:66-82` |
+| CAN-P0-004 | P0 | HOST-FIXED/DEVICE-PENDING | stage/load 已接真实 adapter（Band 10 Pro 经原厂 insmod，Band 11 经自定义 loader）；卸载一律 next-boot，不热卸载；真机 gate 待验证 | `manager/service/canopus_supervisor_platform.c`（`sup_load_module`、`sup_stage_*`） |
 | CAN-P0-005 | P0 | HOST-FIXED/DEVICE-PENDING | removable disable 没有 stop/drain/unload，可能在 callback 活跃时谎报 disabled | `manager/service/canopus_supervisor.c:99-159` |
-| CAN-P0-006 | P0 | HOST-FIXED/DEVICE-PENDING | safe mode 只置位，不阻止 install/enable/load，启动恢复也未持久化 | `manager/service/canopus_supervisor.c:86-164` |
+| CAN-P0-006 | P0 | HOST-FIXED/DEVICE-PENDING | safe mode 现拒绝一切激活（只放行 query、disable/remove/rollback 的 next-boot 意图、Manager 与启动器入口发布）且写入注册表头，重启保持；启动恢复：每个模块的启动计数写入注册表，连续两次未稳定即回退旧代或禁用；全局 BOOTING/OK 标记，连续 3 次未完成的启动、3 次模块隔离未经一次好启动、注册表不可读，都会自动进入 safe mode；退出 = `EXIT_SAFE_MODE`（保持 / 全部禁用 / 全部回滚）→ 下次启动试运行（trial），试运行启动没有稳定就回到 safe mode。仅 host 测试，未做真机验证 | `manager/service/canopus_supervisor.c:86-164` |
 | CAN-P0-007 | P0 | BLOCKED-EVIDENCE | native app 注册、页面工厂、UI dispatcher、callback 和注销 lifetime 未实机证明 | `targets/xiaomi-band-10-pro-3.101.030/evidence/EVID-APP-004.json` |
 | CAN-P0-008 | P0 | HOST-FIXED/DEVICE-PENDING | CPRT Manager protocol 与 CPC1/CPS1 设备 protocol 未连接，Manager 无正式 transport | `manager/protocol/canopus_protocol.h:19-61`、`manager/service/canopus_supervisor.h:25-32` |
 | CAN-P1-001 | P1 | OPEN | `/dev/canopus` mode 为 `0666`，mutating control surface 无调用者边界 | `manager/service/canopus_supervisor_platform.c:17-19` |
@@ -933,7 +945,7 @@ Gate：所有 security/device gates 通过后，才能将 native app/UI SDK 标�
 | CAN-P1-006 | P1 | HOST-FIXED/DEVICE-PENDING | package slot rename 事务不可恢复、previous/.old 堵塞、目录持久化不足 | `manager/storage/canopus_store.c:64-260` |
 | CAN-P1-007 | P1 | HOST-FIXED/DEVICE-PENDING | remove 后 supervisor slot 不回收，`module_count` 最终与实际不一致 | `manager/service/canopus_supervisor.c:127-137,236-259` |
 | CAN-P1-008 | P1 | HOST-FIXED/DEVICE-PENDING | command 末尾无条件清零 `error_code`，失败原因丢失 | `manager/service/canopus_supervisor.c:171-173` |
-| CAN-P1-009 | P1 | HOST-FIXED/DEVICE-PENDING | ordered-list parser/serializer 缺少 out/apps NULL 与 bounded-name 完整检查 | `app-sdk/launcher/canopus_ordered_list.c:25-107` |
+| CAN-P1-009 | P1 | HOST-FIXED/DEVICE-PENDING | ordered-list parser/serializer 缺少 out/apps NULL 与 bounded-name 完整检查 | `manager/target/canopus_ordered_list.c:25-107`（原 `app-sdk/launcher`） |
 | CAN-P1-010 | P1 | HOST-FIXED/DEVICE-PENDING | module descriptor validation 只检查 size/major，未检查 flags、identity、callbacks | `runtime/module/canopus_module.c:28-42` |
 | CAN-P1-011 | P1 | HOST-FIXED/DEVICE-PENDING | ELF verifier 只检查 relocation 指向的 SHN_ABS，未覆盖代码/数据中的直接绝对地址 | `tools/elf-verifier/src/verifier.rs:155-195` |
 | CAN-P1-012 | P1 | HOST-FIXED/DEVICE-PENDING | target veneer 的 evidence/promotion 状态没有成为 codegen 强制 gate | `targets/xiaomi-band-10-pro-3.101.030/generated/canopus_veneer.h:107-153` |
@@ -953,7 +965,7 @@ Gate：所有 security/device gates 通过后，才能将 native app/UI SDK 标�
 | CAN-P2-011 | P2 | CLOSED | target-generated Rust binding 存在两份提交副本，单一来源和同步边界不清晰 | `targets/xiaomi-band-10-pro-3.101.030/generated/canopus_bindings.rs`、`sdk/rust/canopus-target-generated/src/generated.rs` |
 | CAN-P2-012 | P2 | OPEN | 32-bit firmware packed pointer layout 可在 64-bit host 被误用，缺 compile-time usage barrier | `sdk/rust/canopus-target-generated/src/lib.rs:46-131` |
 | CAN-P2-013 | P2 | OPEN | public error 仍混用 `-1`、字符串和 target errno，Manager 无稳定可本地化错误模型 | manager/runtime/store 多处 |
-| CAN-P2-014 | P2 | HOST-FIXED/DEVICE-PENDING | C UI ABI 1.4、21 种 semantic components（含 `NavigationHeader`）、backend capability negotiation、generation-safe bounded Router、host fake、Rust `canopus-ui-core`、compile-fail checks 与 bounded typed app runtime 已实现；仍缺 exact-target native prefab backend/device lifecycle proof，以及完整 C-Rust catalog byte-equivalence tests | `app-sdk/ui/`、`sdk/rust/canopus-ui-core/`、`tests/host/test_ui.c` |
+| CAN-P2-014 | P2 | HOST-FIXED/DEVICE-PENDING | C UI ABI 2.0、20 种有效 semantic components（含 `NavigationHeader`，17 号 slider 已退役）、显式 backend capability negotiation、generation-safe bounded Router、host fake、Rust `canopus-ui-core`、compile-fail checks 与 bounded typed app runtime 已实现；P7.13 在 `.043/.155` host 接入图片 CONTAIN/COVER/STRETCH 与任意非零 `font_px`（`CAP_FONT`，按字号缓存 + 原生标签 `DELETE` 绑定 + 渲染队列/VG wait 退役），其它目标位关闭。仍缺真机字体/图片生命周期验证与完整 C-Rust catalog byte-equivalence；无新增 device/production 批准 | `sdk/c/canopus_ui.h`、`runtime/ui/`、`manager/target/canopus_ui_font.inc`、`tests/host/test_ui_backend.c`、`docs/native-ui-image-font-verification.md`、`docs/native-ui-font-lifecycle-abi.md` |
 | CAN-P2-015 | P2 | CLOSED | CI 缺 protocol schema drift、evidence completeness、文档状态和 device-evidence metadata gate | `scripts/ci.sh`、`tools/canopus-core/tests/generated_stability.rs` |
 | CAN-P2-016 | P2 | CLOSED | 固定容量表/计数器的 overflow、saturation、pagination 和 boot wrap policy 未统一 | supervisor/protocol/diagnostics/UI bounded tables |
 | CAN-P2-017 | P2 | CLOSED | store API 通过 cast 修改 `const` 对象，错误状态与并发所有权不清晰 | `manager/storage/canopus_store.c:42-60,153-231` |

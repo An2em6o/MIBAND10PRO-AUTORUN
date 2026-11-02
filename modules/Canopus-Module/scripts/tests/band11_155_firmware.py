@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
 """Execute the independently built .155 loader, Manager and notification paths."""
 import struct
+import sys as _s, pathlib as _p
+_s.path.insert(0, str(_p.Path(__file__).resolve().parent))
+import cpc2
 import unittest
 import band11_notification_firmware as notifications
 from band11_arm_bootstrap import Machine
-from band11_native_ui_firmware import NativeUI
+from band11_native_ui_firmware import NativeUI, NativeUITests
 from unicorn.arm_const import UC_ARM_REG_R1, UC_ARM_REG_R2
 
 TARGET = 'xiaomi-band-11-4.100.155'
 
 
 class Notifications155(notifications.NotificationTests):
+    target = TARGET
+
+
+class NativeUI155(NativeUITests):
     target = TARGET
 
 
@@ -35,10 +42,11 @@ class Bootstrap155(unittest.TestCase):
         fw = notifications.NotificationFirmware(m)
         frame = 0x200d0000
         for command, arg in [(0x4351000a, 0), (0x43510002, 0), (0x43510002, 1), (0x43510002, 2)]:
-            m.uc.mem_write(frame, struct.pack('<4I', 0x43504331, command, arg, 0))
+            request = cpc2.legacy(command, arg)
+            m.uc.mem_write(frame, request)
             m.uc.reg_write(UC_ARM_REG_R1, frame)
-            m.uc.reg_write(UC_ARM_REG_R2, 16)
-            self.assertEqual(m.call(m.word(m.fops + 12)), 16)
+            m.uc.reg_write(UC_ARM_REG_R2, len(request))
+            self.assertEqual(m.call(m.word(m.fops + 12)), len(request))
         self.assertEqual(m.launcher, [0xca])
         self.assertEqual(len(fw.reminders), 1)
         page = m.pages[0]

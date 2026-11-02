@@ -10,8 +10,7 @@ local original_loaded_os = loaded.os
 local state_key = "canopus.band11.execute_recovery.v1"
 local firmware_version = native_os.getenv('CANOPUS_TEST_BAND11_VERSION') or '4.100.139'
 local target_id = 'xiaomi-band-11-' .. firmware_version
-local builds = {['4.100.139']='user-4.100.139-cn-202608280000', ['4.100.155']='user-4.100.155-cn-202609041500'}
-builds['4.100.177'] = 'user-4.100.177-cn-202609241530'
+local builds = {['4.100.139']='user-4.100.139-cn-202608280000', ['4.100.155']='user-4.100.155-cn-202609041500', ['4.100.179']='user-4.100.179-cn-202609302100'}
 local build = assert(builds[firmware_version])
 local identity = "ro.build.version=" .. firmware_version .. "\nro.build.id=" .. build .. "\n"
 local profile
@@ -178,7 +177,7 @@ local function object(parent, props)
 end
 lvgl.Object, lvgl.Label = object, object
 lvgl.Timer = function(props)
-    assert(props.period >= 100 and props.paused and props.repeat_count == -1)
+    assert(props.period >= 100 and props.repeat_count == -1 and props.paused)
     function props:resume() self.paused = false end
     function props:delete() self.deleted = true end
     function props:ready() error("must allow the UI to paint between steps") end
@@ -214,19 +213,32 @@ __band11_fixture_open = function(path, mode)
         return {
             write = function(self, payload)
                 assert(painted == objects[4].text, "command ran before its status could paint")
-                local magic, op, arg0 = string.unpack("<I4I4I4", payload)
-                assert(magic == 0x43504331 and #payload == 16)
+                local magic, _, kind, major, _, total, op, id, _, _, size = string.unpack("<I4I2I2I2I2I4I4I4I4I4I4", payload)
+                -- Mirror decode_request: a stale abi_major is rejected before
+                -- the command is dispatched, so assert it here too.
+                assert(magic == 0x43504332 and kind == 1 and major == 2
+                    and total == #payload and total == 36 + size)
+                local arg0 = size == 4 and string.unpack("<I4", payload, 37) or 0
                 if reject_command then return nil, "fixture command rejected" end
-                device_commands[#device_commands + 1] = {op, arg0}
+                device_commands[#device_commands + 1] = {op, arg0, id}
                 return self
             end,
             read = function()
-                local w = {}; for i = 1,96 do w[i] = 0 end
-                w[1],w[2],w[6],w[7] = 0x43505331,1,device_commands[#device_commands][1],5
-                return string.pack("<" .. string.rep("I4",96), table.unpack(w))
+                local last = device_commands[#device_commands]
+                return string.pack("<I4I2I2I2I2I4I4I4I4I4I4", 0x43504332, 36, 2, 1, 0, 36, last[1], last[3], 0, 5, 0)
             end,
-            close = function() return true end,
+            -- The device handle reports no close status, as Mirage .155 does;
+            -- a close result must never be mistaken for a failed request.
+            close = function() return nil end,
         }
+    end
+    if path:match("^/data/canopus/[%w%.]+$") and path ~= "/data/canopus/manager_icon.bin" then
+        if mode == "wb" then
+            return {write = function(self, data) files[path] = data; return self end,
+                    close = function() return true end}
+        end
+        if files[path] == nil then return nil end
+        return {read = function() return files[path] end, close = function() return true end}
     end
     if path == "/data/canopus/manager_icon.bin" then
         return {read = function() return files[path] end,
@@ -247,12 +259,15 @@ __band11_fixture_open = function(path, mode)
         data="\127ELF" .. string.char(1,1,1) .. string.rep("\0",9) .. string.pack("<I2I2",1,40) .. string.rep("\0",492)
     elseif path:match('manager_icon.bin$') then
         data=string.char(0x19,0,0,0) .. string.pack("<I2I2I4I4",1,1,0,0)
-    elseif path:match('canopus_stage[12]%-') then data=string.rep('x',64) end
+    elseif path:match('canopus_stage[12]%-') then data=string.rep('x',64)
+    end
     if data then return {read=function(_,n) return type(n)=='number' and data:sub(1,n) or data end,
         seek=function() return #data end, close=function() return true end} end
 end
 local original = fixture.open
 io.open = function(...) return original(...) end
+-- NSH commands the installer issues for its own state files.
+__band11_test_execute = function() return true end
 local file = assert(native_io.open(assert(arg[3]), "rb"))
 local source = file:read("*a"); file:close()
 local count
@@ -264,20 +279,6 @@ source, count = source:gsub('(%["' .. firmware_version:gsub('%.', '%%.') .. '"%]
     return head .. body .. tail
 end)
 assert(count == 1, 'fixture must replace only the selected recovery profile')
-if arg[5] then
-    -- Offline fixture generation only: no shell operation belongs to production.
-    local f=assert(native_io.open(arg[5], "wb")); f:write(source); f:close()
-    assert(host_execute("python3 scripts/tests/encrypt_fixture.py " .. arg[5]) == true)
-    f=assert(native_io.open(arg[5], "rb")); source=f:read("*a"); f:close()
-elseif arg[4] then
-    -- Patch firmware pointers above, then strip debug data and run through the
-    -- exact production wrapper. Compiling here keeps the fixture host ABI.
-    local f = assert(native_io.open(arg[4], "rb"))
-    local template = f:read("*a"); f:close()
-    local binary = string.dump(assert(load(source, "@fixture", "t")), true)
-    local hex = binary:gsub(".", function(c) return string.format("%02x", c:byte()) end)
-    source = template:gsub("%-%- @PAYLOAD@", function() return '"' .. hex .. '"' end)
-end
 enter(function() assert(load(source, "band11-generated-entry", "t"))() end)
 assert(#clicks == 2 and #objects == 8, "Run/Clear Env production UI missing")
 assert(objects[1].w == 212 and objects[1].h == 520)
@@ -296,8 +297,8 @@ local in_progress = objects[4].text
 clicks[1](); clicks[2]()
 assert(objects[4].text == in_progress, "busy clicks obscured the current step")
 drain()
-assert(#device_commands == 4 and device_commands[1][1] == 0x4351000a)
-for i=2,4 do assert(device_commands[i][1] == 0x43510002 and device_commands[i][2] == i-2) end
+assert(#device_commands == 4 and device_commands[1][1] == 14)
+for i=2,4 do assert(device_commands[i][1] == 13 and device_commands[i][2] == i-2) end
 assert(objects[4].text:match("^Run completed"))
 for _, step in ipairs({"复核 Supervisor", "检查运行环境", "读取并校验管理器图标",
     "写入管理器图标", "回读校验管理器图标", "恢复已启用模块", "注册管理器",

@@ -9,11 +9,20 @@ use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------- target
 
+/// The stock NuttX module loader, used on Band 10 Pro.
+pub const STOCK_MODLIB_LOADER: &str = "nuttx-modlib-elf32-rel";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TargetPack {
     #[serde(rename = "schema")]
     pub schema: u32,
     pub target_id: String,
+    /// `active` (default) or `frozen` (data kept, out of CI/prod/Rust matrix).
+    pub status: Option<String>,
+    /// Family layer name (`targets/_families/<family>.toml`).
+    pub family: Option<String>,
+    /// Suffix of the generated Rust bindings (`generated_<rust_module>.rs`).
+    pub rust_module: Option<String>,
     pub device_family: String,
     pub device_model: String,
     pub board_revision: Option<String>,
@@ -31,6 +40,11 @@ pub struct TargetPack {
     pub module_abi: u32,
     pub relocation_profile: String,
     pub revision: u32,
+    /// Static bring-up ABI: emit address constants/wrappers for restricted
+    /// STATIC_RECOVERED records. Never an approval; the generated header is
+    /// marked `CANOPUS_SUP_STATIC_TEST_ABI`.
+    #[serde(default)]
+    pub static_test_abi: Option<bool>,
     pub loader_profile: Option<LoaderProfile>,
     pub capabilities: Option<Vec<String>>,
     pub provenance: Option<TargetProvenance>,
@@ -38,6 +52,15 @@ pub struct TargetPack {
      * scans module instructions and data for 32-bit values inside these
      * ranges; every hit must be in the allowed-address allowlist. */
     pub firmware_address_ranges: Option<Vec<AddressRange>>,
+}
+
+impl TargetPack {
+    /// A portable module reaches the services only through the context its
+    /// constructor receives. The stock modlib calls constructors without
+    /// arguments, so such a module cannot start on it.
+    pub fn loads_portable(&self) -> bool {
+        self.loader != STOCK_MODLIB_LOADER
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -256,16 +279,27 @@ pub struct ModuleManifest {
     #[serde(rename = "schema")]
     pub schema: u32,
     pub module: ModuleInfo,
-    pub targets: ModuleTargets,
+    pub build: ModuleBuild,
+    pub targets: Option<ModuleTargets>,
     pub features: Option<Vec<String>>,
     pub capabilities: Option<ModuleCapabilities>,
     pub native_app: Option<NativeApp>,
+    pub resources: Option<ModuleResources>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModuleResources {
+    pub files: Option<Vec<String>>,
+    pub targets: Option<std::collections::HashMap<String, Vec<String>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModuleInfo {
     pub id: String,
     pub version: String,
+    pub version_code: u32,
+    /// `portable` (default) or `target`.
+    pub kind: Option<String>,
     pub language: String,
     pub lifecycle: String,
     pub canopus_abi: String,
@@ -274,9 +308,23 @@ pub struct ModuleInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModuleBuild {
+    pub sources: Vec<String>,
+    pub include_dirs: Option<Vec<String>>,
+    pub defines: Option<Vec<String>>,
+    pub allowed_constants: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModuleTargets {
-    pub include: Vec<String>,
+    pub include: Option<Vec<String>>,
     pub exclude: Option<Vec<String>>,
+}
+
+impl ModuleManifest {
+    pub fn is_portable(&self) -> bool {
+        self.module.kind.as_deref() != Some("target")
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -305,16 +353,17 @@ pub struct PackageManifest {
     pub module_id: String,
     pub version: String,
     pub build_generation: u64,
+    pub version_code: Option<u32>,
     pub canopus_abi: String,
     pub lifecycle: String,
     pub artifacts: Vec<PackageArtifact>,
     pub capabilities: Option<ModuleCapabilities>,
     pub native_app: Option<PackageNativeApp>,
+    pub resources: Option<Vec<PackageResource>>,
     pub update_semantics: Option<String>,
     pub remove_semantics: Option<String>,
     pub reboot_required: Option<bool>,
     pub target_pack_revision: u64,
-    pub signature: PackageSignature,
     pub min_manager_version: String,
     pub sbom: Option<String>,
     pub reproducibility: Option<Reproducibility>,
@@ -327,6 +376,8 @@ pub struct PackageArtifact {
     pub firmware_sha256: String,
     pub path: String,
     pub sha256: String,
+    pub receipt_path: Option<String>,
+    pub receipt_sha256: Option<String>,
     pub symbols_used: Option<Vec<String>>,
 }
 
@@ -351,12 +402,6 @@ pub struct PackageResource {
     pub sha256: String,
     pub media_type: String,
     pub target_backend: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PackageSignature {
-    pub key_id: String,
-    pub algorithm: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

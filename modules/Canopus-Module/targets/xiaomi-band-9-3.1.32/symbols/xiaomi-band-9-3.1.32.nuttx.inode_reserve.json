@@ -4,14 +4,14 @@
   "kind": "function",
   "instruction_set": "thumb",
   "proof": {
-    "static": "confirmed",
+    "static": "recovered",
     "device": "not_probed",
     "evidence_ids": [
       "EVID-SUPERVISOR-9132-004"
     ]
   },
-  "policy": "managed",
-  "status": "STATIC_CONFIRMED",
+  "policy": "restricted",
+  "status": "STATIC_RECOVERED",
   "provenance": {
     "firmware_sha256": "9c02dab4020b2cc9666ee7d34cf27d311b76aadcec519a38361bbcbd94c53264",
     "source": "exact Xiaomi Band 9 3.1.32 IDB; direct register_driver/inode reserve call-chain review",
@@ -19,20 +19,11 @@
       "EVID-SUPERVISOR-9132-004"
     ]
   },
-  "approval_state": "APPROVED",
-  "promotion": {
-    "reviewer": "canopus-static-abi-review",
-    "date": "2026-08-31",
-    "firmware_sha256": "9c02dab4020b2cc9666ee7d34cf27d311b76aadcec519a38361bbcbd94c53264",
-    "ownership": "firmware inode tree; caller must hold/release the exact global inode lock",
-    "thread": "privileged loader task only",
-    "device_probe": "pending direct registration device gate",
-    "prototype": "int(const char *, void **)"
-  },
+  "approval_state": "PENDING",
   "symbol_id": "xiaomi-band-9-3.1.32.exact.inode_reserve",
   "name": "inode_reserve",
   "entry_address": "0x0c4f7b7c",
-  "callable_address": "0x0c4f7b7d",
+  "callable_address": "0xc4f7b7d",
   "prototype": "int(const char *, void **)",
-  "notes": "reserves an inode path and returns the real -EEXIST/-ENOMEM/-EINVAL result"
+  "notes": "reserves an inode path and returns the real -EEXIST/-ENOMEM/-EINVAL result 2026-10-24 restored exact 3.1.32 records; earlier approval withdrawn, restricted/PENDING, device not probed. Loader is now Band-11-style staged, not the rejected NSH path."
 }

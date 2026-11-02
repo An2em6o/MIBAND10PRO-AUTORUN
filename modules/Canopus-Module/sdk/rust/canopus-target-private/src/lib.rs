@@ -1,10 +1,15 @@
 //! Target-private full-trust ABI facade.
 //!
-//! Band 10 Pro and Band 11 select exact firmware backends. Band 9 Pro and
-//! Band 9 retain compile-only candidate facades. Private static recovery and
-//! physical device validation are recorded separately in each target pack.
-//! P65 selects an experimental exact-AP VFS/native-UI facade; unsupported
-//! Bluetooth and lifecycle operations remain explicit fail-closed stubs.
+//! Band 10 Pro and Band 11 select exact firmware backends. Private static
+//! recovery and physical device validation are recorded separately in each
+//! target pack.
+//!
+//! Supported target devices:
+//! - Xiaomi Band 10 Pro (3.101.036): `targets/xiaomi_band_10_pro_3_101_036.rs`
+//! - Xiaomi Band 10 Pro (3.101.043): `targets/xiaomi_band_10_pro_3_101_043.rs`
+//! - Xiaomi Band 11 (4.100.139): `targets/xiaomi_band_11_4_100_139.rs`
+//! - Xiaomi Band 11 (4.100.155): `targets/xiaomi_band_11_4_100_155.rs`
+//! - Xiaomi Band 11 (4.100.179): `targets/xiaomi_band_11_4_100_179.rs`
 
 #![no_std]
 #![deny(unsafe_op_in_unsafe_fn)]
@@ -12,56 +17,25 @@
 #![allow(clippy::missing_safety_doc)]
 
 #[cfg(feature = "target-xiaomi-band-10-pro-3-101-036")]
-#[path = "generated_symbols_1036.rs"]
+#[path = "generated_symbols_xiaomi_band_10_pro_3_101_036.rs"]
 pub mod generated_symbols;
 
 #[cfg(feature = "target-xiaomi-band-10-pro-3-101-043")]
-#[path = "generated_symbols_1043.rs"]
+#[path = "generated_symbols_xiaomi_band_10_pro_3_101_043.rs"]
 pub mod generated_symbols;
 
-#[cfg(not(any(
+#[cfg(any(
     feature = "target-xiaomi-band-10-pro-3-101-036",
-    feature = "target-xiaomi-band-10-pro-3-101-043",
-    feature = "target-xiaomi-band-9-pro-3-1-175",
-    feature = "target-xiaomi-band-11-4-100-139",
-    feature = "target-xiaomi-band-11-4-100-155",
-    feature = "target-xiaomi-band-11-4-100-177",
-    feature = "target-xiaomi-band-9-3-1-32",
-    feature = "target-xiaomi-p65-3-100-043"
-)))]
-compile_error!("canopus-target-private requires exactly one target-feature");
+    feature = "target-xiaomi-band-10-pro-3-101-043"
+))]
+pub mod band10_pro;
 
 #[cfg(any(
-    all(
-        feature = "target-xiaomi-band-10-pro-3-101-036",
-        any(
-            feature = "target-xiaomi-band-10-pro-3-101-043",
-            feature = "target-xiaomi-band-9-pro-3-1-175",
-            feature = "target-xiaomi-band-11-4-100-139",
-            feature = "target-xiaomi-band-9-3-1-32"
-        )
-    ),
-    all(
-        feature = "target-xiaomi-band-10-pro-3-101-043",
-        any(
-            feature = "target-xiaomi-band-9-pro-3-1-175",
-            feature = "target-xiaomi-band-11-4-100-139",
-            feature = "target-xiaomi-band-9-3-1-32"
-        )
-    ),
-    all(
-        feature = "target-xiaomi-band-9-pro-3-1-175",
-        any(
-            feature = "target-xiaomi-band-11-4-100-139",
-            feature = "target-xiaomi-band-9-3-1-32"
-        )
-    ),
-    all(
-        feature = "target-xiaomi-band-11-4-100-139",
-        feature = "target-xiaomi-band-9-3-1-32"
-    )
+    feature = "target-xiaomi-band-11-4-100-139",
+    feature = "target-xiaomi-band-11-4-100-155",
+    feature = "target-xiaomi-band-11-4-100-179"
 ))]
-compile_error!("canopus-target-private requires exactly one target feature");
+pub mod band11;
 
 #[cfg(feature = "target-xiaomi-band-10-pro-3-101-036")]
 #[path = "targets/xiaomi_band_10_pro_3_101_036.rs"]
@@ -71,59 +45,16 @@ mod selected;
 #[path = "targets/xiaomi_band_10_pro_3_101_043.rs"]
 mod selected;
 
-#[cfg(all(
-    feature = "target-xiaomi-band-11-4-100-155",
-    any(
-        feature = "target-xiaomi-band-10-pro-3-101-036",
-        feature = "target-xiaomi-band-10-pro-3-101-043",
-        feature = "target-xiaomi-band-9-pro-3-1-175",
-        feature = "target-xiaomi-band-11-4-100-139",
-        feature = "target-xiaomi-band-9-3-1-32"
-    )
-))]
-compile_error!("canopus-target-private requires exactly one target feature");
-
-#[cfg(any(
-    feature = "target-xiaomi-band-11-4-100-139",
-    feature = "target-xiaomi-band-11-4-100-155",
-    feature = "target-xiaomi-band-11-4-100-177"
-))]
+#[cfg(feature = "target-xiaomi-band-11-4-100-139")]
 #[path = "targets/xiaomi_band_11_4_100_139.rs"]
 mod selected;
 
-#[cfg(any(
-    feature = "target-xiaomi-band-9-pro-3-1-175",
-    feature = "target-xiaomi-band-9-3-1-32"
-))]
-#[path = "targets/static_candidate.rs"]
+#[cfg(feature = "target-xiaomi-band-11-4-100-155")]
+#[path = "targets/xiaomi_band_11_4_100_155.rs"]
 mod selected;
 
-#[cfg(feature = "target-xiaomi-p65-3-100-043")]
-#[path = "targets/xiaomi_p65_3_100_043.rs"]
+#[cfg(feature = "target-xiaomi-band-11-4-100-179")]
+#[path = "targets/xiaomi_band_11_4_100_179.rs"]
 mod selected;
 
-#[cfg(any(
-    feature = "target-xiaomi-band-10-pro-3-101-036",
-    feature = "target-xiaomi-band-10-pro-3-101-043",
-    feature = "target-xiaomi-band-9-pro-3-1-175",
-    feature = "target-xiaomi-band-11-4-100-139",
-    feature = "target-xiaomi-band-11-4-100-155",
-    feature = "target-xiaomi-band-11-4-100-177",
-    feature = "target-xiaomi-band-9-3-1-32",
-    feature = "target-xiaomi-p65-3-100-043"
-))]
 pub use selected::*;
-
-#[cfg(all(
-    feature = "target-xiaomi-band-11-4-100-177",
-    any(
-        feature = "target-xiaomi-band-10-pro-3-101-036",
-        feature = "target-xiaomi-band-10-pro-3-101-043",
-        feature = "target-xiaomi-band-9-pro-3-1-175",
-        feature = "target-xiaomi-band-11-4-100-139",
-        feature = "target-xiaomi-band-11-4-100-155",
-        feature = "target-xiaomi-band-9-3-1-32",
-        feature = "target-xiaomi-p65-3-100-043",
-    )
-))]
-compile_error!("canopus-target-private requires exactly one target feature");

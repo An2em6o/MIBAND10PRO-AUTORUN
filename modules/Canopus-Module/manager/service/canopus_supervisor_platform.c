@@ -2,13 +2,11 @@
  *
  * Registers /dev/canopus exactly the way btpatch registers /dev/btpatch:
  * stock `register_driver` selected by the target veneer, with a 12-word file_operations array
- * whose read side renders the 384-byte status ABI and whose write side
- * dispatches the 16-byte command ABI. This is the same managed symbol the
- * target pack exposes via the generated veneer (`canopus_fw_register_driver`).
+ * whose read/write sides exchange CPC2 requests and responses. The generated
+ * veneer selects the exact firmware entry points.
  *
- * Loading/unloading Canopus modules and package staging remain fail-closed
- * until the stock modlib path for arbitrary ET_REL modules is proven (G0 for
- * target modules); the installer control surface works now.
+ * Package staging verifies target-bound receipts and artifact digests before
+ * committing a generation. Private L2 integration remains experimental.
  */
 #include "canopus_supervisor.h"
 #include "canopus_supervisor_platform.h"
@@ -16,23 +14,29 @@
 #include "canopus_target_config.h"
 #ifdef CANOPUS_SUP_BAND11_BOOTSTRAP
 #include "band11/canopus_band11_abi.h"
-#elif defined(CANOPUS_SUP_P65_RESIDENT)
-#include "p65/canopus_p65_abi.h"
-#include "p65/canopus_manager_p65_registry.h"
 #endif
-#if defined(CANOPUS_SUP_BAND11_BOOTSTRAP) || defined(CANOPUS_SUP_P65_RESIDENT)
+#if defined(CANOPUS_SUP_BAND11_BOOTSTRAP)
 #define CANOPUS_SUP_RESIDENT_DRIVER 1
 #endif
+#ifdef CANOPUS_SUP_BAND9_BOOTSTRAP
+/* Generated from targets/<id>/loader/bootstrap.toml by the build script. It
+ * carries the exact inode primitives; the stock register_driver wrapper
+ * discards inode_reserve errors. */
+#include "canopus_band9_loader_config.h"
+#endif
+#include "../../runtime/hook/canopus_hook.h"
 #include "canopus_installer_bundle.h"
 #include "canopus_module_registration.h"
 #include "canopus_runtime.h"
 #include "canopus_veneer.h" /* canopus_fw_register_driver / canopus_fw_unregister_driver */
-#ifdef CANOPUS_SUP_BAND9_BOOTSTRAP
-#include "canopus_band9_loader_config.h"
+#include "canopus_memory.h"
+#include "canopus_ui_host.h"
+#include "canopus_l2_probe_config.h"
+#ifndef CANOPUS_SUP_HAS_OWNER_PUMP
+#define CANOPUS_SUP_HAS_OWNER_PUMP CANOPUS_SUP_HAS_L2
 #endif
 #ifdef CANOPUS_SUP_CUSTOM_LOADER
 #include "canopus_elf32_loader.h"
-#include "canopus_memory.h"
 #endif
 #include "sha256.h"
 
@@ -42,13 +46,21 @@
  * Keep this outside /data, which is a mounted filesystem. */
 #define CANOPUS_SUP_INSTALLER_PATH "/canopus/install"
 #define CANOPUS_SUP_INBOX_ROOT "/data/canopus/inbox/"
-#define CANOPUS_SUP_RECEIPT_SUFFIX ".cmi"
-#define CANOPUS_SUP_MODULE_SUFFIX ".ko"
+/* Package kinds: generation A, generation B, and the staging area the
+ * miwear client writes to. The client only ever writes the NEXT pair. */
+enum { SUP_KIND_A = 0, SUP_KIND_B = 1, SUP_KIND_NEXT = 2, SUP_KIND_COUNT = 3 };
+static const char *const s_receipt_suffix[SUP_KIND_COUNT] = {
+    ".cmi", ".cmi.b", ".cmi.next"};
+static const char *const s_module_suffix[SUP_KIND_COUNT] = {
+    ".ko", ".ko.b", ".ko.next"};
 #define CANOPUS_SUP_PATH_MAX 224u
-#define CANOPUS_SUP_READ_CHUNK 512u
+/* Read granularity for the hash/verify readbacks; larger blocks mean fewer
+ * flash syscalls per byte. */
+#define CANOPUS_SUP_READ_CHUNK 1024u
 #define CANOPUS_SUP_NUTTX_O_RDONLY 1
 #define CANOPUS_SUP_NUTTX_O_WRONLY 2u
 #define CANOPUS_SUP_NUTTX_O_CREAT 0x4u
+#define CANOPUS_SUP_NUTTX_O_RDWR (CANOPUS_SUP_NUTTX_O_RDONLY | CANOPUS_SUP_NUTTX_O_WRONLY)
 #define CANOPUS_SUP_DEVICE_MODE 438u /* 0666 */
 #define CANOPUS_SUP_FOPS_WORDS 12u   /* matches the stock file_operations table */
 /* Next-boot registry persistence (see canopus_supervisor.h for the format). */
@@ -74,7 +86,61 @@ struct sup_loaded_module {
 };
 
 static struct sup_loaded_module s_loaded_modules[CANOPUS_SUP_MODULE_SLOTS];
-#endif
+
+#ifdef CANOPUS_SUP_BAND11_BOOTSTRAP
+/* Inline hooks on Band 11. A module image in Umem runs at its PSRAM alias and
+ * is written through the data view, so the hook engine asks for both: only the
+ * calling module's own executable region may be patched, and the trampolines
+ * sit in one Umem block that is executed through its alias too. */
+static uintptr_t sup_hook_write_address(uint32_t slot, uintptr_t code,
+                                        uint32_t length)
+{
+    const struct sup_loaded_module *loaded;
+    const struct canopus_elf_module *image;
+    uintptr_t offset;
+    if (slot >= CANOPUS_SUP_MODULE_SLOTS) return 0u;
+    loaded = &s_loaded_modules[slot];
+    image = &loaded->image;
+    if (!loaded->aliased || image->allocation == 0 || image->region_count == 0u ||
+        image->regions[0].kind != CANOPUS_ELF_REGION_EXEC ||
+        code < image->code_base) {
+        return 0u;
+    }
+    offset = code - image->code_base;
+    if (offset < image->regions[0].offset || length > image->regions[0].size ||
+        offset - image->regions[0].offset > image->regions[0].size - length) {
+        return 0u;
+    }
+    return (uintptr_t)image->target_base + offset;
+}
+
+/* Allocated on the first inline hook and kept: the Supervisor is never unloaded. */
+static int sup_hook_trampoline_memory(uint32_t size, uintptr_t *exec,
+                                      uintptr_t *write)
+{
+    void *block = canopus_fw_mm_memalign_scratch(32u, size);
+    uint32_t alias;
+    if (block == 0) return -1;
+    alias = b11_exec_alias((uintptr_t)block, size);
+    if (alias == 0u) {
+        canopus_fw_mm_free_scratch(block);
+        return -1;
+    }
+    *exec = alias;
+    *write = (uintptr_t)block;
+    return 0;
+}
+
+static int sup_hook_publish(void)
+{
+    return b11_publish_code();
+}
+
+static const struct canopus_hook_code_view s_hook_code_view = {
+    sup_hook_write_address, sup_hook_trampoline_memory, sup_hook_publish,
+};
+#endif /* CANOPUS_SUP_BAND11_BOOTSTRAP */
+#endif /* CANOPUS_SUP_CUSTOM_LOADER */
 
 /* CAN-P2-002: the fops table is typed from the recovered layout instead of a
  * bare uint32_t[12]. The veneer's `file_operations` carries the exact device
@@ -138,6 +204,7 @@ static int sup_control_close(void *filep)
 static int32_t sup_control_read(void *filep, void *buffer, uint32_t count)
 {
     (void)filep;
+    (void)canopus_sup_l2_start();
     return canopus_supervisor_device_read(canopus_supervisor_get(), buffer, count);
 }
 
@@ -148,6 +215,7 @@ static int32_t sup_control_write(void *filep, const void *buffer, uint32_t count
     int rc;
 
     (void)filep;
+    (void)canopus_sup_l2_start();
     if (canopus_module_registration_is_frame(buffer, count)) {
         registration = (const struct canopus_module_registration_v1 *)buffer;
         if (registration->descriptor == 0u ||
@@ -167,12 +235,14 @@ static int32_t sup_control_write(void *filep, const void *buffer, uint32_t count
 static int32_t sup_installer_read(void *filep, void *buffer, uint32_t count)
 {
     (void)filep;
+    (void)canopus_sup_l2_start();
     return canopus_supervisor_installer_read(canopus_supervisor_get(), buffer, count);
 }
 
 static int32_t sup_installer_write(void *filep, const void *buffer, uint32_t count)
 {
     (void)filep;
+    (void)canopus_sup_l2_start();
     return canopus_supervisor_installer_write(canopus_supervisor_get(), buffer, count);
 }
 
@@ -191,6 +261,9 @@ static int sup_register_device(void *cookie)
     int rc;
 
     (void)cookie;
+#ifdef CANOPUS_SUP_BAND11_BOOTSTRAP
+    canopus_hook_set_code_view(&s_hook_code_view);
+#endif
     s_fops.open = (void *)(uintptr_t)&sup_control_open;
     s_fops.close = (void *)(uintptr_t)&sup_control_close;
     s_fops.read = (void *)(uintptr_t)&sup_control_read;
@@ -236,6 +309,12 @@ static int sup_register_device(void *cookie)
     fd = open_file(CANOPUS_SUP_INSTALLER_PATH, CANOPUS_SUP_NUTTX_O_RDONLY);
     if (fd < 0) return -(CANOPUS_SUP_REGISTER_VERIFY_ERRNO_BASE + 2);
     (void)close_file(fd);
+    /* Band 10 Pro autorun defers L2 bootstrap to control I/O. Keep the
+     * existing constructor bootstrap for other targets, including loaders
+     * whose only subsequent control path may be L2. */
+    if (canopus_strcmp(CANOPUS_SUP_TARGET_ID, "xiaomi-band-10-pro-3.101.036") != 0 &&
+        canopus_strcmp(CANOPUS_SUP_TARGET_ID, "xiaomi-band-10-pro-3.101.043") != 0)
+        (void)canopus_sup_l2_start();
     return 0;
 }
 
@@ -249,13 +328,6 @@ static int sup_unregister_device(void *cookie)
     return CANOPUS_SUP_UNREGISTER_DRIVER(CANOPUS_SUP_DEVICE_PATH);
 #endif
 }
-
-static const uint8_t s_installer_public_key[32] = {
-    0x85, 0xcb, 0x6b, 0x0d, 0xf8, 0x42, 0xa7, 0xaf,
-    0xf0, 0xb8, 0x1a, 0xa9, 0xd4, 0x8a, 0x5c, 0x25,
-    0x2a, 0x8a, 0x11, 0xa0, 0x61, 0x88, 0xd2, 0xa4,
-    0x28, 0xe9, 0x2a, 0x77, 0x72, 0x5d, 0xa5, 0x55,
-};
 
 static const uint8_t s_firmware_sha256[32] =
     CANOPUS_SUP_FIRMWARE_SHA256_BYTES;
@@ -347,6 +419,16 @@ static int sup_registry_errno(void)
         (errno_location_fn)(uintptr_t)CANOPUS_SUP_NUTTX_ERRNO_LOCATION;
     int *value = errno_location();
     return value != 0 && *value > 0 ? *value : 0;
+}
+
+/* A NuttX call result as a service result: success keeps its value, failure
+ * becomes the negated errno (a bare -1 when none was set). */
+static int sup_negated_errno(int rc)
+{
+    int error;
+    if (rc >= 0) return rc;
+    error = sup_registry_errno();
+    return error != 0 ? -error : CANOPUS_SVC_ERR_IO;
 }
 
 static void sup_registry_diag(uint32_t stage, int error)
@@ -531,15 +613,17 @@ static int sup_module_id_equal(const uint8_t fixed[CANOPUS_INSTALL_MODULE_ID_SIZ
     return 0;
 }
 
-static int sup_verify_package_at(
-    const char *token, struct canopus_install_receipt_v1 *receipt,
-    const char *module_path, uint32_t *diagnostic)
+static int sup_verify_kind(
+    const char *token, uint32_t kind, struct canopus_install_receipt_v1 *receipt,
+    uint32_t *diagnostic)
 {
     uint8_t digest[CANOPUS_INSTALL_DIGEST_SIZE];
     char receipt_path[CANOPUS_SUP_PATH_MAX];
+    char module_path[CANOPUS_SUP_PATH_MAX];
 
-    if (diagnostic == 0 || receipt == 0 || module_path == 0 ||
-        sup_make_path(receipt_path, token, CANOPUS_SUP_RECEIPT_SUFFIX) != 0) {
+    if (diagnostic == 0 || receipt == 0 || kind >= SUP_KIND_COUNT ||
+        sup_make_path(receipt_path, token, s_receipt_suffix[kind]) != 0 ||
+        sup_make_path(module_path, token, s_module_suffix[kind]) != 0) {
         if (diagnostic != 0) *diagnostic = CANOPUS_SUP_ERR_STAGE_PATH;
         return -1;
     }
@@ -547,10 +631,9 @@ static int sup_verify_package_at(
         return -1;
     }
     if (canopus_install_receipt_validate(receipt, CANOPUS_SUP_TARGET_ID,
-                                         s_firmware_sha256,
-                                         s_installer_public_key) != 0 ||
+                                         s_firmware_sha256) != 0 ||
         !sup_module_id_equal(receipt->module_id, token)) {
-        *diagnostic = CANOPUS_SUP_ERR_STAGE_SIGNATURE;
+        *diagnostic = CANOPUS_SUP_ERR_STAGE_RECEIPT_INVALID;
         return -1;
     }
     if (sup_hash_artifact(module_path, receipt->artifact_size, digest) != 0 ||
@@ -559,6 +642,70 @@ static int sup_verify_package_at(
         return -1;
     }
     *diagnostic = CANOPUS_SUP_ERR_NONE;
+    return 0;
+}
+
+static int sup_stage_verify(void *cookie, const char *token, uint32_t *version,
+                            uint32_t *lifecycle)
+{
+    struct canopus_supervisor_v1 *sup = canopus_supervisor_get();
+    struct canopus_install_receipt_v1 receipt;
+    uint32_t diagnostic;
+    (void)cookie;
+    if (sup_verify_kind(token, SUP_KIND_NEXT, &receipt, &diagnostic) != 0) {
+        sup->error_code = diagnostic;
+        return -1;
+    }
+    *version = receipt.module_version;
+    *lifecycle = receipt.lifecycle_class;
+    return 0;
+}
+
+static int sup_gen_exists(void *cookie, const char *token, uint32_t gen)
+{
+    char path[CANOPUS_SUP_PATH_MAX];
+    uint32_t magic;
+    (void)cookie;
+    if (gen > 1u || sup_make_path(path, token, s_receipt_suffix[gen]) != 0) return 0;
+    return sup_read_exact(path, &magic, sizeof(magic), 0) == 0;
+}
+
+static int sup_gen_verify(void *cookie, const char *token, uint32_t gen,
+                          uint32_t *version, uint32_t *lifecycle)
+{
+    struct canopus_install_receipt_v1 receipt;
+    uint32_t diagnostic;
+    (void)cookie;
+    if (gen > 1u ||
+        sup_verify_kind(token, gen, &receipt, &diagnostic) != 0) {
+        return -1;
+    }
+    *version = receipt.module_version;
+    *lifecycle = receipt.lifecycle_class;
+    return 0;
+}
+
+/* Replaces generation `gen` with the staged pair. The receipt is the commit
+ * record: it is removed first and renamed in last, so a partial move leaves a
+ * generation that fails verification instead of one that verifies wrongly. */
+static int sup_stage_commit(void *cookie, const char *token, uint32_t gen)
+{
+    char from_receipt[CANOPUS_SUP_PATH_MAX];
+    char from_module[CANOPUS_SUP_PATH_MAX];
+    char to_receipt[CANOPUS_SUP_PATH_MAX];
+    char to_module[CANOPUS_SUP_PATH_MAX];
+    (void)cookie;
+    if (gen > 1u ||
+        sup_make_path(from_receipt, token, s_receipt_suffix[SUP_KIND_NEXT]) != 0 ||
+        sup_make_path(from_module, token, s_module_suffix[SUP_KIND_NEXT]) != 0 ||
+        sup_make_path(to_receipt, token, s_receipt_suffix[gen]) != 0 ||
+        sup_make_path(to_module, token, s_module_suffix[gen]) != 0) {
+        return -1;
+    }
+    (void)sup_unlink_path(to_receipt);
+    (void)sup_unlink_path(to_module);
+    if (sup_rename_path(from_module, to_module) != 0) return -1;
+    if (sup_rename_path(from_receipt, to_receipt) != 0) return -1;
     return 0;
 }
 
@@ -604,7 +751,11 @@ static void *sup_loader_allocate(void *cookie, uint32_t size,
 static void sup_loader_release(void *cookie, void *allocation, uint32_t size)
 {
     struct sup_loaded_module *loaded = cookie;
+    struct canopus_supervisor_v1 *sup = canopus_supervisor_get();
+    uint32_t slot = (uint32_t)(loaded - s_loaded_modules);
     (void)size;
+    canopus_supervisor_release_services(sup, slot);
+    sup->modules[slot].descriptor = 0;
 
 #ifdef CANOPUS_SUP_BAND11_BOOTSTRAP
     if (loaded->aliased) {
@@ -717,10 +868,15 @@ fail:
 
 static int sup_loader_invoke(void *cookie, uint32_t callable)
 {
-    typedef void (*entry_fn)(void);
+    /* Init entries receive the module's service context in r0. Modules that
+     * declare a void() entry ignore it. */
+    typedef void (*entry_fn)(const struct canopus_context_v1 *);
     entry_fn entry = (entry_fn)(uintptr_t)(callable | 1u);
+    struct canopus_supervisor_v1 *sup = canopus_supervisor_get();
     (void)cookie;
-    entry();
+    entry(sup->loading_slot >= 0
+              ? canopus_supervisor_context(sup, (uint32_t)sup->loading_slot)
+              : 0);
     return 0;
 }
 
@@ -808,9 +964,10 @@ static int sup_load_module(void *cookie, uint32_t index,
      * subsequent target pack may promote this to a proven atomic fd loader;
      * this firmware's verified public modlib API accepts paths only. */
     if (!sup_module_id_equal(sup->modules[index].module_id, module_name) ||
-        sup_make_path(path, module_name, CANOPUS_SUP_MODULE_SUFFIX) != 0 ||
-        sup_verify_package_at(module_name, &receipt, path,
-                              &sup->error_code) != 0 ||
+        sup_make_path(path, module_name,
+                      s_module_suffix[sup->modules[index].active_gen & 1u]) != 0 ||
+        sup_verify_kind(module_name, sup->modules[index].active_gen & 1u,
+                        &receipt, &sup->error_code) != 0 ||
         receipt.lifecycle_class != sup->modules[index].lifecycle_class ||
         receipt.lifecycle_class != lifecycle_class ||
         receipt.module_version != sup->modules[index].version) {
@@ -841,8 +998,17 @@ static int sup_load_module(void *cookie, uint32_t index,
     sup->loading_slot = -1;
     if (sup->modules[index].descriptor == 0) {
         sup->error_code = CANOPUS_SUP_ERR_DESCRIPTOR_MISSING;
+        canopus_supervisor_release_services(sup, index);
 #ifdef CANOPUS_SUP_CUSTOM_LOADER
         sup_unload_custom(index);
+#else
+        /* Nothing references the image (no descriptor was published), so it
+         * can be released; otherwise a retry under the same module name, such
+         * as a fallback to the previous generation, fails with EEXIST. */
+        {
+            typedef int (*rmmod_fn)(void *);
+            (void)((rmmod_fn)(uintptr_t)CANOPUS_SUP_RMMOD)(handle);
+        }
 #endif
         return -1;
     }
@@ -854,9 +1020,9 @@ static int sup_load_module(void *cookie, uint32_t index,
 static int sup_remove_artifact(void *cookie, uint32_t index)
 {
     struct canopus_supervisor_v1 *sup = canopus_supervisor_get();
-    char receipt_path[CANOPUS_SUP_PATH_MAX];
-    char module_path[CANOPUS_SUP_PATH_MAX];
+    char path[CANOPUS_SUP_PATH_MAX];
     const char *module_id;
+    uint32_t kind;
 
     (void)cookie;
     if (sup == 0 || index >= CANOPUS_SUP_MODULE_SLOTS ||
@@ -864,24 +1030,17 @@ static int sup_remove_artifact(void *cookie, uint32_t index)
         return -1;
     }
     module_id = (const char *)sup->modules[index].module_id;
-    if (sup_make_path(receipt_path, module_id, CANOPUS_SUP_RECEIPT_SUFFIX) != 0) {
-        return -1;
+    for (kind = 0u; kind < SUP_KIND_COUNT; kind++) {
+        if (sup_make_path(path, module_id, s_receipt_suffix[kind]) != 0) return -1;
+        (void)sup_unlink_path(path);
+        if (sup_make_path(path, module_id, s_module_suffix[kind]) != 0) return -1;
+        (void)sup_unlink_path(path);
     }
-    if (sup_make_path(module_path, module_id, CANOPUS_SUP_MODULE_SUFFIX) != 0) {
-        return -1;
-    }
-    (void)sup_unlink_path(receipt_path);
-    (void)sup_unlink_path(module_path);
     return 0;
 }
 
 static int sup_registry_persist(void *cookie, const uint8_t *data, uint32_t len)
 {
-#ifdef CANOPUS_SUP_P65_RESIDENT
-    (void)cookie;
-    return canopus_p65_registry_supervisor_save_error(
-        canopus_p65_registry_firmware_persist(data, len));
-#endif
     int rc;
     (void)cookie;
     if (data == 0 || len == 0u || len > CANOPUS_SUP_REGISTRY_SIZE) {
@@ -900,21 +1059,14 @@ static int sup_registry_persist(void *cookie, const uint8_t *data, uint32_t len)
         sup_registry_diag(CANOPUS_SUP_REG_STAGE_RENAME, sup_registry_errno());
         return CANOPUS_SUP_ERR_REGISTRY_RENAME;
     }
-    if (sup_verify_file(CANOPUS_SUP_REGISTRY_PATH, data, len) != 0) {
-        sup_registry_diag(CANOPUS_SUP_REG_STAGE_VERIFY_FINAL,
-                          sup_registry_errno());
-        return CANOPUS_SUP_ERR_REGISTRY_VERIFY_FINAL;
-    }
+    /* The temp readback above is the single publish-time check; the atomic
+     * rename does not need a second one. */
     sup_registry_diag_success();
     return 0;
 }
 
 static int sup_registry_restore(void *cookie, uint8_t *data, uint32_t len)
 {
-#ifdef CANOPUS_SUP_P65_RESIDENT
-    (void)cookie;
-    return canopus_p65_registry_firmware_restore(data, len);
-#endif
     typedef int (*open_fn)(const char *, int, ...);
     typedef int (*close_fn)(int);
     typedef int32_t (*read_fn)(int, void *, uint32_t);
@@ -966,21 +1118,9 @@ static int sup_stage_package(void *cookie, const char *token, uint32_t stage)
         (watchface_reset_fn)(uintptr_t)CANOPUS_SUP_WATCHFACE_RESET;
 #endif
     struct canopus_supervisor_v1 *sup = canopus_supervisor_get();
-    struct canopus_install_receipt_v1 receipt;
-    char module_path[CANOPUS_SUP_PATH_MAX];
-    uint32_t i;
-    uint32_t diagnostic;
-    int slot;
+    int staged;
 
     (void)cookie;
-#ifdef CANOPUS_SUP_P65_RESIDENT
-    /* Defence in depth for in-process callers; do not mutate stock app state
-     * or the registry while cold-boot safety remains unresolved. */
-    if (!CANOPUS_P65_DEPLOYMENT_ENABLED) {
-        sup->error_code = CANOPUS_P65_ERR_DEPLOYMENT_BLOCKED;
-        return CANOPUS_P65_ERR_DEPLOYMENT_BLOCKED;
-    }
-#endif
     /* Payload-free INSTALL is split across separate miwear callbacks so each
      * transaction performs at most one app-registry/Launcher mutation before
      * returning to the event loop. Stage 0 registers Manager. Stages 1 and 2
@@ -995,40 +1135,28 @@ static int sup_stage_package(void *cookie, const char *token, uint32_t stage)
     }
     if (stage != 0u) return -1;
     if (sup == 0) return -1;
-    /* Reject a duplicate before registering a second slot. */
-    for (i = 0u; i < CANOPUS_SUP_MODULE_SLOTS; i++) {
-        if (sup->modules[i].state != 0u &&
-            sup_module_id_equal(sup->modules[i].module_id, token)) {
-            sup->error_code = CANOPUS_SUP_ERR_STAGE_DUPLICATE;
-            return -1;
-        }
-    }
-    /* Copy succeeds only after the signature and artifact are verified. Keep
-     * the inbox files in place: Lua is the writer and later ENABLE resolves the
-     * verified artifact through this stable path. */
-    if (sup_make_path(module_path, token, CANOPUS_SUP_MODULE_SUFFIX) != 0) {
-        sup->error_code = CANOPUS_SUP_ERR_STAGE_PATH;
-        return -1;
-    }
-    if (sup_verify_package_at(token, &receipt, module_path, &diagnostic) != 0) {
-        sup->error_code = diagnostic;
-        return -1;
-    }
-    slot = canopus_supervisor_add_module(
-        sup, receipt.lifecycle_class, receipt.module_version, 1u,
-        (const char *)receipt.module_id);
-    if (slot < 0) {
-        if (sup->error_code == CANOPUS_SUP_ERR_NONE) {
-            sup->error_code = CANOPUS_SUP_ERR_STAGE_REGISTER;
-        }
-        return -1;
-    }
+    /* Fresh install: verified package becomes generation A and the module is
+     * registered disabled. Existing module: a strictly newer version goes to
+     * the inactive generation and takes effect at the next load (staged = 1). */
+    staged = canopus_supervisor_stage_token(sup, token);
+    if (staged < 0) return -1;
+#ifdef CANOPUS_SUP_HEADLESS
+    /* Emulator test builds drive INSTALL from an NSH task, where the UI-side
+     * notification and watchface calls below block; skip them. */
+#ifdef CANOPUS_SUP_WATCHFACE_DELETE
+    (void)delete_watchface;
+#endif
+#ifdef CANOPUS_SUP_WATCHFACE_RESET
+    (void)watchface_reset;
+#endif
+    return staged;
+#endif
     if (canopus_manager_native_notify_module_installed() < 0) {
         /* Registration has already committed a verified, disabled module.
          * Notification is a delivery side effect: preserve the installer page
          * for manual cleanup, but never roll back a valid installation merely
          * because the stock notification service rejects this message. */
-        return 0;
+        return staged;
     }
     /* The firmware watchface manager switches away before deleting an active
      * non-last watchface. Failure is non-fatal: installation remains complete
@@ -1040,8 +1168,833 @@ static int sup_stage_package(void *cookie, const char *token, uint32_t stage)
     /* Keeps the stock watchface layout consistent after the deletion. */
     (void)watchface_reset(0);
 #endif
+    return staged;
+}
+
+
+/* ---- native staging inbox ------------------------------------------- */
+#ifdef CANOPUS_SUP_NUTTX_OPENDIR
+static int sup_list_packages(void *cookie, uint32_t index, char *id)
+{
+    typedef void *(*opendir_fn)(const char *);
+    typedef const uint8_t *(*readdir_fn)(void *);
+    typedef int (*closedir_fn)(void *);
+    uint32_t seen = 0u;
+    const uint8_t *entry;
+    void *dir;
+    (void)cookie;
+    dir = ((opendir_fn)(uintptr_t)CANOPUS_SUP_NUTTX_OPENDIR)(CANOPUS_SUP_INBOX_ROOT);
+    if (dir == 0) return 1;
+    while ((entry = ((readdir_fn)(uintptr_t)CANOPUS_SUP_NUTTX_READDIR)(dir)) != 0) {
+        const char *name = (const char *)(entry + 1);
+        uint32_t n = (uint32_t)canopus_strnlen(name, 48u);
+        uint32_t i;
+        if (n <= 9u || n > 25u || canopus_strcmp(name + n - 9u, ".cmi.next") != 0)
+            continue;
+        canopus_memset(id, 0, CANOPUS_SUP_MODULE_ID_MAX);
+        for (i = 0u; i < n - 9u; i++) id[i] = name[i];
+        id[i] = '\0';
+        if (!canopus_install_module_id_valid((const uint8_t *)id)) continue;
+        if (seen++ == index) {
+            (void)((closedir_fn)(uintptr_t)CANOPUS_SUP_NUTTX_CLOSEDIR)(dir);
+            return 0;
+        }
+    }
+    (void)((closedir_fn)(uintptr_t)CANOPUS_SUP_NUTTX_CLOSEDIR)(dir);
+    return 1;
+}
+#else
+#define sup_list_packages 0
+#endif
+
+#ifdef CANOPUS_SUP_HEADLESS
+#define SUP_UI_PAGE_CLOSE 0
+#define SUP_UI_ROUTE 0
+#define SUP_LAUNCHER_STEP 0
+#else
+static int sup_ui_page_close(void *cookie, uint32_t slot)
+{
+    (void)cookie;
+    return canopus_manager_target_module_page_close(slot);
+}
+#define SUP_UI_PAGE_CLOSE sup_ui_page_close
+
+static int sup_ui_route(void *cookie, uint32_t slot, uint32_t route)
+{
+    (void)cookie;
+    return canopus_manager_target_module_page_route(slot, route);
+}
+#define SUP_UI_ROUTE sup_ui_route
+
+static int sup_launcher_step(void *cookie)
+{
+    (void)cookie;
+    return canopus_manager_target_launcher_step();
+}
+#define SUP_LAUNCHER_STEP sup_launcher_step
+#endif
+
+#if defined(CANOPUS_SUP_HEADLESS) || defined(CANOPUS_SUP_BAND9_BOOTSTRAP)
+#define SUP_APP_PUBLISH 0
+#define SUP_NATIVE_APP_ID_IN_USE 0
+#else
+static int sup_app_publish(void *cookie, uint32_t slot,
+                            const struct canopus_app_entry_v1 *entry)
+{
+    (void)cookie;
+    return canopus_manager_target_app_publish(slot, entry);
+}
+
+static int sup_native_app_id_in_use(void *cookie, uint16_t app_id)
+{
+    (void)cookie;
+    return canopus_manager_target_native_app_id_in_use(app_id);
+}
+#define SUP_APP_PUBLISH sup_app_publish
+#define SUP_NATIVE_APP_ID_IN_USE sup_native_app_id_in_use
+#endif
+
+static int sup_validate_receipt(void *cookie, const void *receipt)
+{
+    (void)cookie;
+    return canopus_install_receipt_validate(receipt, CANOPUS_SUP_TARGET_ID,
+                                            s_firmware_sha256);
+}
+
+/* FS service hooks: plain NuttX file calls through the proven pointers. */
+static int64_t sup_file_seek(void *cookie, int fd, int64_t offset, int32_t whence);
+static int sup_file_close(void *cookie, int fd);
+
+/* Maps the service flags onto the proven NuttX primitives. READ opens an
+ * existing file; WRITE creates or truncates (O_TRUNC is not proven on these
+ * firmwares, so the file is unlinked first); WRITE|READ keeps the contents;
+ * APPEND keeps the contents and seeks to the end. */
+static int sup_file_open(void *cookie, const char *path, uint32_t flags)
+{
+    typedef int (*open_fn)(const char *, int, ...);
+    open_fn open_file = (open_fn)(uintptr_t)CANOPUS_SUP_NUTTX_OPEN;
+    int fd;
+    int access;
+    if ((flags & CANOPUS_FS_WRITE) == 0u) {
+        fd = open_file(path, CANOPUS_SUP_NUTTX_O_RDONLY);
+        return sup_negated_errno(fd);
+    }
+    access = (flags & CANOPUS_FS_READ) != 0u ? CANOPUS_SUP_NUTTX_O_RDWR
+                                              : CANOPUS_SUP_NUTTX_O_WRONLY;
+    if ((flags & CANOPUS_FS_APPEND) == 0u &&
+        ((flags & CANOPUS_FS_READ) == 0u || (flags & CANOPUS_FS_TRUNC) != 0u)) {
+        (void)sup_unlink_path(path);
+    }
+    fd = open_file(path, access | CANOPUS_SUP_NUTTX_O_CREAT, CANOPUS_SUP_DEVICE_MODE);
+    if (fd < 0) return sup_negated_errno(fd);
+    if ((flags & CANOPUS_FS_APPEND) != 0u && sup_file_seek(cookie, fd, 0, CANOPUS_FS_SEEK_END) < 0) {
+        (void)sup_file_close(cookie, fd);
+        return CANOPUS_SVC_ERR_IO;
+    }
+    return fd;
+}
+
+static int32_t sup_file_read(void *cookie, int fd, void *buffer, uint32_t size)
+{
+    typedef int32_t (*read_fn)(int, void *, uint32_t);
+    (void)cookie;
+    return ((read_fn)(uintptr_t)CANOPUS_SUP_NUTTX_READ)(fd, buffer, size);
+}
+
+static int32_t sup_file_write(void *cookie, int fd, const void *buffer,
+                              uint32_t size)
+{
+    typedef int32_t (*write_fn)(int, const void *, uint32_t);
+    (void)cookie;
+    return ((write_fn)(uintptr_t)CANOPUS_SUP_NUTTX_WRITE)(fd, buffer, size);
+}
+
+static int sup_file_close(void *cookie, int fd)
+{
+    typedef int (*close_fn)(int);
+    (void)cookie;
+    return ((close_fn)(uintptr_t)CANOPUS_SUP_NUTTX_CLOSE)(fd);
+}
+
+static int sup_file_remove(void *cookie, const char *path)
+{
+    (void)cookie;
+    return sup_negated_errno(sup_unlink_path(path));
+}
+
+static int64_t sup_file_seek(void *cookie, int fd, int64_t offset, int32_t whence)
+{
+#ifdef CANOPUS_SUP_NUTTX_LSEEK
+    typedef int64_t (*lseek_fn)(int, int64_t, int);
+    (void)cookie;
+    return ((lseek_fn)(uintptr_t)CANOPUS_SUP_NUTTX_LSEEK)(fd, offset, whence);
+#else
+    (void)cookie; (void)fd; (void)offset; (void)whence;
+    return -1;
+#endif
+}
+
+#ifdef CANOPUS_SUP_NUTTX_FSYNC
+static int sup_file_sync(void *cookie, int fd)
+{
+    typedef int (*fsync_fn)(int fd);
+    (void)cookie;
+    return sup_negated_errno(((fsync_fn)(uintptr_t)CANOPUS_SUP_NUTTX_FSYNC)(fd));
+}
+#define SUP_FILE_SYNC sup_file_sync
+#else
+#define SUP_FILE_SYNC 0
+#endif
+
+static int sup_file_rename_hook(void *cookie, const char *from, const char *to)
+{
+    (void)cookie;
+    return sup_negated_errno(sup_rename_path(from, to));
+}
+
+#ifdef CANOPUS_SUP_NUTTX_STAT
+/* The stock struct stat is 104 bytes: st_mode at +8, st_size (int64) at +32
+ * and the access/modify/change times as 16-byte timespecs from +56, so
+ * st_mtim.tv_sec (int64) is at +72. A filesystem that does not keep times
+ * leaves them 0, which the service reports as "unknown". */
+#define SUP_STAT_SIZE 104u
+#define SUP_STAT_MODE_WORD 2u
+#define SUP_STAT_SIZE_WORD 8u
+#define SUP_STAT_MTIME_WORD 18u
+#define SUP_S_IFMT 0xF000u
+#define SUP_S_IFDIR 0x4000u
+
+static int sup_file_stat_hook(void *cookie, const char *path, void *out_stat)
+{
+    typedef int (*stat_fn)(const char *path, void *buffer);
+    struct canopus_fs_stat *st = (struct canopus_fs_stat *)out_stat;
+    uint32_t words[SUP_STAT_SIZE / 4u];
+    int rc;
+    (void)cookie;
+    if (st == 0) return CANOPUS_SVC_ERR_ARGUMENT;
+    canopus_memset(st, 0, sizeof(*st));
+    rc = ((stat_fn)(uintptr_t)CANOPUS_SUP_NUTTX_STAT)(path, words);
+    if (rc < 0) return sup_negated_errno(rc);
+    st->is_dir = (words[SUP_STAT_MODE_WORD] & SUP_S_IFMT) == SUP_S_IFDIR;
+    st->size = words[SUP_STAT_SIZE_WORD + 1u] != 0u ? 0xFFFFFFFFu : words[SUP_STAT_SIZE_WORD];
+    st->mtime = words[SUP_STAT_MTIME_WORD + 1u] == 0u ? words[SUP_STAT_MTIME_WORD] : 0u;
     return 0;
 }
+#else
+/* Without a recovered stat: a directory is anything opendir accepts, a file
+ * reports its size through lseek, and mtime stays 0 (unknown). */
+static int sup_file_stat_hook(void *cookie, const char *path, void *out_stat)
+{
+    struct canopus_fs_stat *st = (struct canopus_fs_stat *)out_stat;
+    typedef int (*open_fn)(const char *, int, ...);
+    typedef int (*close_fn)(int);
+    open_fn open_file = (open_fn)(uintptr_t)CANOPUS_SUP_NUTTX_OPEN;
+    close_fn close_file = (close_fn)(uintptr_t)CANOPUS_SUP_NUTTX_CLOSE;
+    int fd;
+    (void)cookie;
+    if (st == 0) return CANOPUS_SVC_ERR_ARGUMENT;
+    canopus_memset(st, 0, sizeof(*st));
+#ifdef CANOPUS_SUP_NUTTX_OPENDIR
+    {
+        typedef void *(*opendir_fn)(const char *);
+        typedef int (*closedir_fn)(void *);
+        void *dir = ((opendir_fn)(uintptr_t)CANOPUS_SUP_NUTTX_OPENDIR)(path);
+        if (dir != 0) {
+            (void)((closedir_fn)(uintptr_t)CANOPUS_SUP_NUTTX_CLOSEDIR)(dir);
+            st->is_dir = 1u;
+            return 0;
+        }
+    }
+#endif
+    fd = open_file(path, CANOPUS_SUP_NUTTX_O_RDONLY);
+    if (fd < 0) return sup_negated_errno(fd);
+#ifdef CANOPUS_SUP_NUTTX_LSEEK
+    {
+        typedef int64_t (*lseek_fn)(int, int64_t, int);
+        int64_t sz = ((lseek_fn)(uintptr_t)CANOPUS_SUP_NUTTX_LSEEK)(fd, 0, CANOPUS_FS_SEEK_END);
+        st->size = sz >= 0 ? (uint32_t)sz : 0u;
+    }
+#endif
+    (void)close_file(fd);
+    return 0;
+}
+#endif
+
+#ifdef CANOPUS_SUP_NUTTX_MKDIR
+static int sup_dir_mkdir(void *cookie, const char *path)
+{
+    typedef int (*mkdir_fn)(const char *, uint32_t);
+    (void)cookie;
+    /* The stock Bluetooth service creates /data/misc with mode 0777. */
+    return sup_negated_errno(((mkdir_fn)(uintptr_t)CANOPUS_SUP_NUTTX_MKDIR)(path, 0777u));
+}
+#define SUP_DIR_MKDIR sup_dir_mkdir
+#else
+#define SUP_DIR_MKDIR 0
+#endif
+
+#ifdef CANOPUS_SUP_NUTTX_RMDIR
+static int sup_dir_remove(void *cookie, const char *path)
+{
+    typedef int (*rmdir_fn)(const char *);
+    (void)cookie;
+    return sup_negated_errno(((rmdir_fn)(uintptr_t)CANOPUS_SUP_NUTTX_RMDIR)(path));
+}
+#define SUP_DIR_REMOVE sup_dir_remove
+#else
+#define SUP_DIR_REMOVE 0
+#endif
+
+#ifdef CANOPUS_SUP_NUTTX_OPENDIR
+static void *sup_dir_open(void *cookie, const char *path)
+{
+    typedef void *(*opendir_fn)(const char *);
+    (void)cookie;
+    return ((opendir_fn)(uintptr_t)CANOPUS_SUP_NUTTX_OPENDIR)(path);
+}
+
+static int sup_dir_read(void *cookie, void *dir, void *entry)
+{
+    typedef const uint8_t *(*readdir_fn)(void *);
+    struct canopus_fs_dirent *de = (struct canopus_fs_dirent *)entry;
+    const uint8_t *raw;
+    const char *name;
+    uint32_t length;
+    (void)cookie;
+    if (dir == 0 || de == 0) return -1;
+    raw = ((readdir_fn)(uintptr_t)CANOPUS_SUP_NUTTX_READDIR)(dir);
+    if (raw == 0) return 1; /* EOF */
+    canopus_memset(de, 0, sizeof(*de));
+    /* NuttX packs d_type at +0 and d_name at +1 (EVID-DIR-4155-001 /
+     * EVID-DIR-1043-001), also used by sup_list_packages above. */
+    name = (const char *)raw + 1;
+    length = (uint32_t)canopus_strnlen(name, sizeof(de->name));
+    if (length > CANOPUS_FS_NAME_MAX) return CANOPUS_SVC_ERR_ARGUMENT;
+    canopus_memcpy(de->name, name, length + 1u);
+    /* NuttX/POSIX d_type: DT_DIR = 4 (EVID-DIR-4155-001 / caller 0xc3a5bb6).
+     * Also accept 2 for compatibility with legacy test vectors. */
+    de->is_dir = (raw[0] == 4u || raw[0] == 2u);
+    return 0;
+}
+
+static int sup_dir_close(void *cookie, void *dir)
+{
+    typedef int (*closedir_fn)(void *);
+    (void)cookie;
+    if (dir == 0) return -1;
+    return ((closedir_fn)(uintptr_t)CANOPUS_SUP_NUTTX_CLOSEDIR)(dir);
+}
+#define SUP_DIR_OPEN sup_dir_open
+#define SUP_DIR_READ sup_dir_read
+#define SUP_DIR_CLOSE sup_dir_close
+#else
+#define SUP_DIR_OPEN 0
+#define SUP_DIR_READ 0
+#define SUP_DIR_CLOSE 0
+#endif
+
+static void *sup_heap_realloc(void *cookie, void *ptr, uint32_t size)
+{
+    (void)cookie;
+    (void)ptr;
+    (void)size;
+    return 0;
+}
+
+static int sup_reboot(void *cookie)
+{
+    (void)cookie;
+    /* Cortex-M33 Application Interrupt and Reset Control Register (AIRCR)
+     * VECTKEY (0x05FA0000) | SYSRESETREQ (1 << 2) triggers CPU/system reset */
+    __asm__ volatile("dsb" ::: "memory");
+    *(volatile uint32_t *)0xE000ED0Cu = 0x05FA0004u;
+    __asm__ volatile("dsb\n\tisb" ::: "memory");
+    while (1) { __asm__ volatile("wfi"); }
+    return 0;
+}
+
+#ifdef CANOPUS_SUP_CLOCK_GETTIME
+static uint32_t sup_monotonic_ms(void *cookie)
+{
+    struct { int64_t sec; int32_t nsec; } ts = {0, 0};
+    typedef int (*clock_fn)(uint32_t, void *);
+    (void)cookie;
+    /* CLOCK_MONOTONIC = 1; stock_timespec_t is {int64 sec, int32 nsec}. */
+    (void)((clock_fn)(uintptr_t)CANOPUS_SUP_CLOCK_GETTIME)(1u, &ts);
+    return (uint32_t)ts.sec * 1000u + (uint32_t)ts.nsec / 1000000u;
+}
+#define SUP_MONOTONIC_MS sup_monotonic_ms
+#else
+#define SUP_MONOTONIC_MS 0
+#endif
+
+#if defined(CANOPUS_SUP_HEAP_MALLOC) && defined(CANOPUS_SUP_HEAP_FREE)
+static void *sup_heap_alloc(void *cookie, uint32_t size)
+{
+    typedef void *(*malloc_fn)(uint32_t);
+    (void)cookie;
+    return ((malloc_fn)(uintptr_t)CANOPUS_SUP_HEAP_MALLOC)(size);
+}
+
+static void sup_heap_release(void *cookie, void *ptr)
+{
+    /* 036/043 return int, Band 11 returns void; the result is unused. */
+    typedef void (*free_fn)(void *);
+    (void)cookie;
+    ((free_fn)(uintptr_t)CANOPUS_SUP_HEAP_FREE)(ptr);
+}
+#define SUP_HEAP_ALLOC sup_heap_alloc
+#define SUP_HEAP_RELEASE sup_heap_release
+#else
+#define SUP_HEAP_ALLOC 0
+#define SUP_HEAP_RELEASE 0
+#endif
+
+#ifdef CANOPUS_SUP_HEADLESS
+#define SUP_NOTIFY 0
+#else
+static int sup_notify(void *cookie, const char *source, const char *title, const char *body,
+                      const char *icon)
+{
+    (void)cookie;
+    return canopus_manager_native_notify(source, title, body, icon);
+}
+#define SUP_NOTIFY sup_notify
+#endif
+
+/* ---- stock hardware services ------------------------------------------
+ *
+ * Every hook below calls an exact-target firmware entry point generated into
+ * canopus_target_config.h / canopus_band11_addresses.h. A target without the
+ * macros gets a NULL hook and the service answers UNSUPPORTED; nothing here
+ * returns a made-up value. All calls run on the module/UI task. The entry
+ * points are static-recovered and restricted, not device probed. */
+
+#define SUP_EBUSY (-16)
+#define SUP_ENOENT (-2)
+#define SUP_EINVAL (-22)
+#define SUP_ENOMEM (-12)
+#define SUP_ENOSYS (-38)
+
+/* Battery: Band 10 Pro exposes three getters, Band 11 one snapshot copy. */
+#if defined(CANOPUS_SUP_PM_BATTERY_READY) && defined(CANOPUS_SUP_PM_BATTERY_LEVEL) && \
+    defined(CANOPUS_SUP_PM_BATTERY_CHARGING)
+static int sup_battery_state(void *cookie, uint32_t *percent, int *charging)
+{
+    typedef int (*getter_fn)(void);
+    (void)cookie;
+    if (!((getter_fn)(uintptr_t)CANOPUS_SUP_PM_BATTERY_READY)()) return SUP_EBUSY;
+    *percent = (uint32_t)((getter_fn)(uintptr_t)CANOPUS_SUP_PM_BATTERY_LEVEL)();
+    *charging = ((getter_fn)(uintptr_t)CANOPUS_SUP_PM_BATTERY_CHARGING)() != 0;
+    return 0;
+}
+#define SUP_BATTERY_STATE sup_battery_state
+#elif defined(CANOPUS_SUP_PM_BATTERY_READY) && defined(CANOPUS_SUP_PM_BATTERY_SNAPSHOT)
+static int sup_battery_state(void *cookie, uint32_t *percent, int *charging)
+{
+    typedef int (*ready_fn)(void);
+    typedef uint32_t (*snapshot_fn)(uint32_t out[4]);
+    uint32_t snapshot[4];
+    (void)cookie;
+    if (!((ready_fn)(uintptr_t)CANOPUS_SUP_PM_BATTERY_READY)()) return SUP_EBUSY;
+    (void)((snapshot_fn)(uintptr_t)CANOPUS_SUP_PM_BATTERY_SNAPSHOT)(snapshot);
+    *charging = (snapshot[0] & 0xFFu) != 0u;
+    *percent = snapshot[1];
+    return 0;
+}
+#define SUP_BATTERY_STATE sup_battery_state
+#else
+#define SUP_BATTERY_STATE 0
+#endif
+
+/* Screen state: 0 off, 1 always-on display, 2 on. */
+#if defined(CANOPUS_SUP_SCREEN_GET_STATE) || defined(CANOPUS_SUP_SCREEN_STATE)
+static int sup_screen_state(void *cookie)
+{
+    int state;
+    (void)cookie;
+#if defined(CANOPUS_SUP_SCREEN_GET_STATE)
+    state = ((int (*)(void))(uintptr_t)CANOPUS_SUP_SCREEN_GET_STATE)();
+#else
+    state = *(volatile uint8_t *)(uintptr_t)CANOPUS_SUP_SCREEN_STATE;
+#endif
+    return state >= 0 && state <= 2 ? state : CANOPUS_SVC_ERR_IO;
+}
+#define SUP_SCREEN_STATE sup_screen_state
+#else
+#define SUP_SCREEN_STATE 0
+#endif
+
+#if defined(CANOPUS_SUP_SCREEN_TURN_ON) && !defined(CANOPUS_SUP_HEADLESS)
+/* The stock wake-lock path turns the screen on with source 26. screen_turn_on
+ * hands the request to the display owner and waits for it, so it belongs on the
+ * UI task; a headless (NSH-driven) build, which runs modules on the NSH task,
+ * hangs in it and leaves the call out. */
+#define SUP_SCREEN_SOURCE_WAKELOCK 26
+static const char s_screen_tag[] = "canopus";
+
+static int sup_wake_screen(void *cookie)
+{
+    typedef int (*turn_on_fn)(const char *tag, int source);
+    (void)cookie;
+    (void)((turn_on_fn)(uintptr_t)CANOPUS_SUP_SCREEN_TURN_ON)(s_screen_tag,
+                                                           SUP_SCREEN_SOURCE_WAKELOCK);
+    return 0;
+}
+#define SUP_WAKE_SCREEN sup_wake_screen
+#else
+#define SUP_WAKE_SCREEN 0
+#endif
+
+/* Wake locks: stock PowerManager wakelock at level 6 keeps the screen on while
+ * held. One native object per Supervisor slot, created on first use and kept
+ * for the life of the Supervisor (the stock destroy path is not called). */
+#if defined(CANOPUS_SUP_WAKELOCK_CREATE) && defined(CANOPUS_SUP_WAKELOCK_ACQUIRE) && \
+    defined(CANOPUS_SUP_WAKELOCK_RELEASE)
+#define SUP_WAKELOCK_LEVEL_KEEP_ON 6u
+static void *s_wakelock_object[CANOPUS_WAKELOCK_MAX];
+static const char s_wakelock_tag[] = "canopus";
+
+static int sup_wakelock_acquire(void *cookie, uint32_t index)
+{
+    typedef void *(*create_fn)(uint32_t level_and_flags, const char *tag);
+    typedef void (*lock_fn)(void *wakelock);
+    (void)cookie;
+    if (index >= CANOPUS_WAKELOCK_MAX) return SUP_EINVAL;
+    if (s_wakelock_object[index] == 0) {
+        s_wakelock_object[index] = ((create_fn)(uintptr_t)CANOPUS_SUP_WAKELOCK_CREATE)(
+            SUP_WAKELOCK_LEVEL_KEEP_ON, s_wakelock_tag);
+        if (s_wakelock_object[index] == 0) return SUP_ENOMEM;
+    }
+    ((lock_fn)(uintptr_t)CANOPUS_SUP_WAKELOCK_ACQUIRE)(s_wakelock_object[index]);
+    return 0;
+}
+
+static int sup_wakelock_release(void *cookie, uint32_t index)
+{
+    typedef void (*lock_fn)(void *wakelock);
+    (void)cookie;
+    if (index >= CANOPUS_WAKELOCK_MAX || s_wakelock_object[index] == 0) return SUP_EINVAL;
+    ((lock_fn)(uintptr_t)CANOPUS_SUP_WAKELOCK_RELEASE)(s_wakelock_object[index]);
+    return 0;
+}
+#define SUP_WAKELOCK_ACQUIRE sup_wakelock_acquire
+#define SUP_WAKELOCK_RELEASE sup_wakelock_release
+#else
+#define SUP_WAKELOCK_ACQUIRE 0
+#define SUP_WAKELOCK_RELEASE 0
+#endif
+
+/* Stock system properties. property_get with a NULL default answers -22 for a
+ * key that does not exist; it writes up to 255 bytes plus NUL. */
+#if defined(CANOPUS_SUP_PROPERTY_GET)
+static int sup_property_get(const char *key, char value[256])
+{
+    typedef int (*get_fn)(const char *key, char *value, const char *default_value);
+    return ((get_fn)(uintptr_t)CANOPUS_SUP_PROPERTY_GET)(key, value, 0);
+}
+
+static int sup_get_property(void *cookie, const char *key, char *buf, uint32_t max_len)
+{
+    char value[256];
+    int length, i;
+    (void)cookie;
+    length = sup_property_get(key, value);
+    if (length < 0) return length == SUP_EINVAL ? SUP_ENOENT : length;
+    if ((uint32_t)length > max_len - 1u) length = (int)(max_len - 1u);
+    for (i = 0; i < length; i++) buf[i] = value[i];
+    buf[length] = '\0';
+    return length;
+}
+#define SUP_GET_PROPERTY sup_get_property
+#else
+#define SUP_GET_PROPERTY 0
+#endif
+
+/* Manual brightness through a Canopus MiWearScreen session: while the session
+ * is started its auto-brightness/brightness-value override the user's. The
+ * stock manual range is 31..255 (the settings clamp is 31), so 0% maps to the
+ * stock minimum rather than a black screen. */
+#if defined(CANOPUS_SUP_SCREEN_SESSION_CREATE) && defined(CANOPUS_SUP_SCREEN_SESSION_START) && \
+    defined(CANOPUS_SUP_SCREEN_SESSION_STOP) && \
+    defined(CANOPUS_SUP_SCREEN_SESSION_SET_AUTO_BRIGHTNESS) && \
+    defined(CANOPUS_SUP_SCREEN_SESSION_SET_BRIGHTNESS_VALUE) && \
+    defined(CANOPUS_SUP_SCREEN_SESSION_RESTORE_DEFAULT)
+#define SUP_BRIGHTNESS_MIN 31u
+#define SUP_BRIGHTNESS_MAX 255u
+#define SUP_AUTO_BRIGHTNESS_DISABLED 2
+static void *s_brightness_session;
+static const char s_brightness_tag[] = "canopus.display";
+
+static int sup_set_brightness(void *cookie, uint32_t percent)
+{
+    typedef void *(*create_fn)(const char *tag);
+    typedef void (*start_fn)(void *session, int auto_stop);
+    typedef void (*value_fn)(void *session, int value);
+    (void)cookie;
+    if (percent > 100u) return SUP_EINVAL;
+    if (s_brightness_session == 0) {
+        s_brightness_session = ((create_fn)(uintptr_t)CANOPUS_SUP_SCREEN_SESSION_CREATE)(
+            s_brightness_tag);
+        if (s_brightness_session == 0) return SUP_ENOMEM;
+    }
+    ((value_fn)(uintptr_t)CANOPUS_SUP_SCREEN_SESSION_SET_AUTO_BRIGHTNESS)(
+        s_brightness_session, SUP_AUTO_BRIGHTNESS_DISABLED);
+    ((value_fn)(uintptr_t)CANOPUS_SUP_SCREEN_SESSION_SET_BRIGHTNESS_VALUE)(
+        s_brightness_session,
+        (int)(SUP_BRIGHTNESS_MIN +
+              (percent * (SUP_BRIGHTNESS_MAX - SUP_BRIGHTNESS_MIN) + 50u) / 100u));
+    ((start_fn)(uintptr_t)CANOPUS_SUP_SCREEN_SESSION_START)(s_brightness_session, 0);
+    return 0;
+}
+
+static int sup_restore_brightness(void *cookie)
+{
+    typedef void (*session_fn)(void *session);
+    (void)cookie;
+    if (s_brightness_session == 0) return 0;
+    ((session_fn)(uintptr_t)CANOPUS_SUP_SCREEN_SESSION_RESTORE_DEFAULT)(s_brightness_session);
+    ((session_fn)(uintptr_t)CANOPUS_SUP_SCREEN_SESSION_STOP)(s_brightness_session);
+    return 0;
+}
+#define SUP_SET_BRIGHTNESS sup_set_brightness
+#define SUP_RESTORE_BRIGHTNESS sup_restore_brightness
+#else
+#define SUP_SET_BRIGHTNESS 0
+#define SUP_RESTORE_BRIGHTNESS 0
+#endif
+
+#if defined(CANOPUS_SUP_PROPERTY_GET_INT32)
+/* The manual setting is stored as persist.screen.brightness_value (31..255);
+ * while auto-brightness is on it does not describe what is displayed. */
+static int sup_get_brightness(void *cookie, uint32_t *percent)
+{
+    typedef int (*get_int_fn)(const char *key, int default_value);
+    get_int_fn get_int = (get_int_fn)(uintptr_t)CANOPUS_SUP_PROPERTY_GET_INT32;
+    int value;
+    (void)cookie;
+    if (get_int("persist.screen.auto_brightness", 0) != 0) return SUP_EBUSY;
+    value = get_int("persist.screen.brightness_value", -1);
+    if (value < 0) return SUP_ENOENT;
+    if (value < 31) value = 31;
+    if (value > 255) value = 255;
+    *percent = ((uint32_t)(value - 31) * 100u + 112u) / 224u;
+    return 0;
+}
+#define SUP_GET_BRIGHTNESS sup_get_brightness
+#else
+#define SUP_GET_BRIGHTNESS 0
+#endif
+
+/* Haptics. Band 10 Pro talks to the vibratord service through the stock HAL
+ * client: a 132-byte message with the type at +4 and the argument at +8
+ * (type 4 starts for duration_ms, type 5 stops). */
+#if defined(CANOPUS_SUP_VIBRATOR_HAL_TRANSACT)
+#define SUP_VIB_MSG_SIZE 132u
+#define SUP_VIB_MSG_START 4u
+#define SUP_VIB_MSG_STOP 5u
+#define SUP_VIB_DISABLED (-138) /* the service's "vibration disabled" result */
+
+static int sup_vib_transact(uint32_t type, uint32_t argument)
+{
+    typedef int (*transact_fn)(void *message);
+    uint32_t message[SUP_VIB_MSG_SIZE / 4u];
+    int rc;
+    canopus_memset(message, 0, sizeof(message));
+    ((uint8_t *)message)[4] = (uint8_t)type;
+    message[2] = argument;
+    rc = ((transact_fn)(uintptr_t)CANOPUS_SUP_VIBRATOR_HAL_TRANSACT)(message);
+    if (rc == SUP_VIB_DISABLED) return SUP_EBUSY;
+    /* Any other failure means the service could not be reached or refused. */
+    return rc < 0 ? CANOPUS_SVC_ERR_IO : rc;
+}
+
+/* The service answers with the FF_GAIN write result (8 bytes) on success. */
+static int sup_vibrate(void *cookie, uint32_t duration_ms)
+{
+    int rc;
+    (void)cookie;
+    rc = sup_vib_transact(SUP_VIB_MSG_START, duration_ms);
+    return rc >= 0 ? 0 : rc;
+}
+
+static int sup_vibrate_cancel(void *cookie)
+{
+    int rc;
+    (void)cookie;
+    rc = sup_vib_transact(SUP_VIB_MSG_STOP, 0u);
+    return rc >= 0 ? 0 : rc;
+}
+#define SUP_VIBRATE sup_vibrate
+#define SUP_VIBRATE_CANCEL sup_vibrate_cancel
+#elif defined(CANOPUS_SUP_VIBRATOR_RUN) && defined(CANOPUS_SUP_VIBRATOR_CANCEL)
+/* Band 11 plays through miwear_vibrator_run: a 20-byte parameter block whose
+ * kind byte (+9) 2 selects a waveform; +16 points at {count, segments}, each
+ * 6-byte segment carrying its duration (u16 at +2) and amplitude (u8 at +5).
+ * Priority 0 never preempts an exclusive stock vibration and plays once.
+ * run returns a positive vibration id; cancel stops only that id. */
+struct sup_vib_segment {
+    uint16_t offset;
+    uint16_t duration_ms;
+    uint8_t flags;
+    uint8_t amplitude;
+};
+struct sup_vib_waveform {
+    int32_t count;
+    const struct sup_vib_segment *segments;
+};
+struct sup_vib_params {
+    uint8_t type;
+    uint8_t reserved0[7];
+    uint8_t priority;
+    uint8_t kind;
+    uint8_t reserved1[2];
+    const char *key;
+    const void *data;
+};
+CANOPUS_STATIC_ASSERT(sizeof(struct sup_vib_segment) == 6u, "stock waveform segment is 6 bytes");
+CANOPUS_STATIC_ASSERT(sizeof(struct sup_vib_params) == 20u, "stock vibration parameters are 20 bytes");
+
+#define SUP_VIB_KIND_WAVEFORM 2u
+#define SUP_VIB_AMPLITUDE_MAX 255u
+#define SUP_VIB_BUSY (-3) /* an exclusive stock vibration is playing */
+static int s_vibration_id;
+
+static int sup_vibrate(void *cookie, uint32_t duration_ms)
+{
+    typedef int (*run_fn)(const struct sup_vib_params *params);
+    struct sup_vib_segment segment;
+    struct sup_vib_waveform waveform;
+    struct sup_vib_params params;
+    int id;
+    (void)cookie;
+    if (duration_ms == 0u || duration_ms > 0xFFFFu) return SUP_EINVAL;
+    canopus_memset(&segment, 0, sizeof(segment));
+    segment.duration_ms = (uint16_t)duration_ms;
+    segment.amplitude = SUP_VIB_AMPLITUDE_MAX;
+    waveform.count = 1;
+    waveform.segments = &segment;
+    canopus_memset(&params, 0, sizeof(params));
+    params.kind = SUP_VIB_KIND_WAVEFORM;
+    params.data = &waveform;
+    id = ((run_fn)(uintptr_t)CANOPUS_SUP_VIBRATOR_RUN)(&params);
+    if (id <= 0) return id == SUP_VIB_BUSY ? SUP_EBUSY : (id < 0 ? id : CANOPUS_SVC_ERR_IO);
+    s_vibration_id = id;
+    return 0;
+}
+
+static int sup_vibrate_cancel(void *cookie)
+{
+    typedef void (*cancel_fn)(int id);
+    (void)cookie;
+    if (s_vibration_id > 0) {
+        ((cancel_fn)(uintptr_t)CANOPUS_SUP_VIBRATOR_CANCEL)(s_vibration_id);
+        s_vibration_id = 0;
+    }
+    return 0;
+}
+#define SUP_VIBRATE sup_vibrate
+#define SUP_VIBRATE_CANCEL sup_vibrate_cancel
+#else
+#define SUP_VIBRATE 0
+#define SUP_VIBRATE_CANCEL 0
+#endif
+
+/* Bluetooth adapter state: the stock stack's bt_adapter_get_state on its
+ * adapter instance (0 off, 4 on). */
+#if defined(CANOPUS_SUP_BT_ADAPTER_GET_STATE) && \
+    (defined(CANOPUS_SUP_BT_ADAPTER_GET_INSTANCE) || defined(CANOPUS_SUP_BT_SHARED_ADAPTER))
+static int sup_bt_adapter_state(void *cookie, uint32_t *state)
+{
+    typedef int (*state_fn)(void *adapter);
+    void *adapter;
+    int value;
+    (void)cookie;
+#if defined(CANOPUS_SUP_BT_ADAPTER_GET_INSTANCE)
+    adapter = ((void *(*)(void))(uintptr_t)CANOPUS_SUP_BT_ADAPTER_GET_INSTANCE)();
+#else
+    adapter = *(void *volatile *)(uintptr_t)CANOPUS_SUP_BT_SHARED_ADAPTER;
+#endif
+    if (adapter == 0) return SUP_EBUSY;
+    value = ((state_fn)(uintptr_t)CANOPUS_SUP_BT_ADAPTER_GET_STATE)(adapter);
+    if (value < 0) return CANOPUS_SVC_ERR_IO;
+    *state = (uint32_t)value;
+    return 0;
+}
+#define SUP_BT_ADAPTER_STATE sup_bt_adapter_state
+#else
+#define SUP_BT_ADAPTER_STATE 0
+#endif
+
+/* MiWear companion link: the stock system_all_state keeps it at byte +1 (0 not
+ * reported yet, 1 down, 2 up). The getter spins forever (Band 10 Pro) or
+ * panics (Band 11) before system_init_state sets the state pointer, so the
+ * pointer is checked first. */
+#if defined(CANOPUS_SUP_SYSTEM_GET_STATE) && defined(CANOPUS_SUP_SYSTEM_STATE)
+#define SUP_SYSTEM_STATE_MIWEAR_LINK 1
+static int sup_bt_is_connected(void *cookie)
+{
+    typedef uint32_t *(*get_state_fn)(uint32_t out[2], int state_id);
+    uint32_t out[2];
+    (void)cookie;
+    if (*(void *volatile *)(uintptr_t)CANOPUS_SUP_SYSTEM_STATE == 0) return SUP_EBUSY;
+    (void)((get_state_fn)(uintptr_t)CANOPUS_SUP_SYSTEM_GET_STATE)(out, SUP_SYSTEM_STATE_MIWEAR_LINK);
+    switch (out[0] & 0xFFu) {
+    case 1u: return 0;
+    case 2u: return 1;
+    default: return SUP_EBUSY;
+    }
+}
+#define SUP_BT_IS_CONNECTED sup_bt_is_connected
+#else
+#define SUP_BT_IS_CONNECTED 0
+#endif
+
+#if defined(CANOPUS_SUP_LV_TIMER_CREATE) && defined(CANOPUS_SUP_CLOCK_GETTIME) && \
+    !defined(CANOPUS_SUP_HEADLESS)
+static void *s_service_timer;
+static void (*s_service_timer_poll)(void *);
+static void *s_service_timer_data;
+
+static void sup_service_timer_tick(void *timer)
+{
+    (void)timer;
+    s_service_timer_poll(s_service_timer_data);
+    canopus_ui_host_poll(sup_monotonic_ms(0));
+}
+
+static int sup_start_timer_pump(void *cookie, void (*poll)(void *), void *data)
+{
+    typedef void *(*timer_create_fn)(void (*)(void *), uint32_t, void *);
+    (void)cookie;
+    if (s_service_timer != 0) {
+        return s_service_timer_poll == poll && s_service_timer_data == data
+                   ? CANOPUS_SVC_OK : CANOPUS_SVC_ERR_STATE;
+    }
+    s_service_timer_poll = poll;
+    s_service_timer_data = data;
+    /* Called on the UI owner. The heartbeat is boot-resident and follows
+     * LVGL suspend/resume on screen-off; UI reconstruction is unsupported. */
+    s_service_timer = ((timer_create_fn)(uintptr_t)CANOPUS_SUP_LV_TIMER_CREATE)
+        (sup_service_timer_tick, 10u, 0);
+    return s_service_timer != 0 ? CANOPUS_SVC_OK : CANOPUS_SVC_ERR_NOMEM;
+}
+#define SUP_TIMER_PUMP sup_start_timer_pump
+#else
+#define SUP_TIMER_PUMP 0
+#endif
+
+/* The owner pump also exists without the L2 transport (see canopus_supervisor_l2.c). */
+#if CANOPUS_SUP_HAS_OWNER_PUMP && !defined(CANOPUS_SUP_HEADLESS)
+static int sup_start_background_pump(void *cookie, void (*poll)(void *), void *data)
+{
+    (void)cookie;
+    return canopus_sup_l2_background(poll, data);
+}
+#define SUP_BACKGROUND_PUMP sup_start_background_pump
+#else
+#define SUP_BACKGROUND_PUMP 0
+#endif
 
 const struct canopus_sup_platform_v1 canopus_sup_platform = {
     CANOPUS_SUP_TARGET_ID,
@@ -1052,4 +2005,63 @@ const struct canopus_sup_platform_v1 canopus_sup_platform = {
     sup_remove_artifact,
     sup_registry_persist,
     sup_registry_restore,
+    sup_stage_verify,
+    sup_stage_commit,
+    sup_gen_exists,
+    sup_gen_verify,
+    sup_file_open,
+    sup_file_read,
+    sup_file_write,
+    sup_file_seek,
+    SUP_FILE_SYNC,
+    sup_file_close,
+    sup_file_remove,
+    sup_file_rename_hook,
+    sup_file_stat_hook,
+    SUP_DIR_MKDIR,
+    SUP_DIR_OPEN,
+    SUP_DIR_READ,
+    SUP_DIR_CLOSE,
+    sup_list_packages,
+    SUP_MONOTONIC_MS,
+    SUP_HEAP_ALLOC,
+    sup_heap_realloc,
+    SUP_HEAP_RELEASE,
+    SUP_NOTIFY,
+    sup_reboot,
+    SUP_VIBRATE,
+    SUP_VIBRATE_CANCEL,
+    SUP_SET_BRIGHTNESS,
+    SUP_GET_BRIGHTNESS,
+    SUP_RESTORE_BRIGHTNESS,
+    SUP_WAKE_SCREEN,
+    SUP_SCREEN_STATE,
+    SUP_WAKELOCK_ACQUIRE,
+    SUP_WAKELOCK_RELEASE,
+    SUP_BATTERY_STATE,
+    SUP_GET_PROPERTY,
+    SUP_BT_ADAPTER_STATE,
+    SUP_BT_IS_CONNECTED,
+    SUP_TIMER_PUMP,
+    SUP_BACKGROUND_PUMP,
+    sup_l2_send,
+#if CANOPUS_SUP_HAS_L2
+    sup_l2_event,
+    sup_l2_peer,
+#else
+    0, /* l2_event: no L2 backend, so no CanopusConnect */
+    0, /* l2_peer */
+#endif
+    SUP_UI_PAGE_CLOSE,
+    SUP_UI_ROUTE,
+    SUP_APP_PUBLISH,
+    SUP_LAUNCHER_STEP,
+    sup_validate_receipt,
+#if CANOPUS_SUP_HAS_L2
+    sup_l2_request_slots,
+#else
+    0, /* l2_request_slots */
+#endif
+    SUP_DIR_REMOVE,
+    SUP_NATIVE_APP_ID_IN_USE,
 };

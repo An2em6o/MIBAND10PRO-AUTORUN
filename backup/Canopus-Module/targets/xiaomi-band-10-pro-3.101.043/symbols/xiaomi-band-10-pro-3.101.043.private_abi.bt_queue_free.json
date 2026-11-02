@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "symbol_id": "xiaomi-band-10-pro-3.101.043.private_abi.bt_queue_free",
+  "target_id": "xiaomi-band-10-pro-3.101.043",
+  "name": "bt_queue_free",
+  "kind": "function",
+  "instruction_set": "thumb",
+  "entry_address": "0xc6b9cf0",
+  "prototype": "int(void *)",
+  "calling_convention": "arm-aapcs",
+  "contexts": {
+    "allowed": [
+      "target-private"
+    ],
+    "blocking": false
+  },
+  "proof": {
+    "static": "confirmed",
+    "device": "not_probed",
+    "evidence_ids": [
+      "EVID-BT-1043-ALLOC-001",
+      "EVID-FW-MATCH-ENSEMBLE-1036-1043"
+    ]
+  },
+  "policy": "restricted",
+  "status": "STATIC_RECOVERED",
+  "provenance": {
+    "firmware_sha256": "519307675665e4866d722a8119a98589c397b614ac3294cb87bfc86de45756ec",
+    "evidence_ids": [
+      "EVID-BT-1043-ALLOC-001",
+      "EVID-FW-MATCH-ENSEMBLE-1036-1043"
+    ],
+    "source": "exact 3.101.043 IDB vela_ap.bin.i64; Bluetooth allocator, stock cleanup, buffer, timer, and queue call-flow review"
+  },
+  "approval_state": "PENDING",
+  "notes": "Exact 3.101.043 queue cancellation free callback, shared with bt_free; stock cleanup adapter sub_C7EBD40 forwards its R2 argument to sub_C840C60. Address refreshed by trusted-036 caller-neighborhood ensemble v2; semantic policy retained from the curated 043 record. Address refreshed by trusted-036 caller-neighborhood ensemble v2; semantic policy retained from the curated 043 record.",
+  "callable_address": "0xc6b9cf1"
+}

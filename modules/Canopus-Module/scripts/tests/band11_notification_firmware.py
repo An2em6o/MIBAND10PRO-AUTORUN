@@ -6,13 +6,20 @@ Message normalization, string cloning, list insertion and reminder branching
 execute the exact firmware instructions, including the event consumer that
 faulted in crash3. This does not verify a real display.
 """
+import sys as _sys
+import sys as _s, pathlib as _p
+_s.path.insert(0, str(_p.Path(__file__).resolve().parent))
+import cpc2
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
+import fwlocate
 import hashlib
 import struct
 import unittest
 
 from band11_arm_bootstrap import Machine, ROOT, RES, TARGET
 from unicorn import UC_HOOK_CODE, UcError
-from unicorn.arm_const import UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_PC
+from unicorn.arm_const import UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3, UC_ARM_REG_PC
 
 INSERT = 0x0c8f2bb0
 
@@ -129,7 +136,7 @@ class NotificationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         import tomllib
-        firmware = (ROOT / 'fwbins' / cls.target / 'vela_ap.bin').read_bytes()
+        firmware = (fwlocate.locate(cls.target) or ROOT / 'fwbins' / cls.target / 'vela_ap.bin').read_bytes()
         pack = tomllib.loads((ROOT / 'targets' / cls.target / 'target.toml').read_text())
         assert hashlib.sha256(firmware).hexdigest() == pack['firmware_sha256']
 
@@ -142,10 +149,12 @@ class NotificationTests(unittest.TestCase):
 
     def install_manager(self, m):
         frame = 0x200d0000
-        m.uc.mem_write(frame, struct.pack('<4I', 0x43504331, 0x43510002, 0, 0))
-        m.uc.reg_write(UC_ARM_REG_R1, frame)
-        m.uc.reg_write(UC_ARM_REG_R2, 16)
-        self.assertEqual(m.call(m.word(m.fops + 12)), 16)
+        for command in (0x4351000A, 0x43510002):  # restore, then register the Manager
+            _req = cpc2.legacy(command, 0)
+            m.uc.mem_write(frame, _req)
+            m.uc.reg_write(UC_ARM_REG_R1, frame)
+            m.uc.reg_write(UC_ARM_REG_R2, len(_req))
+            self.assertEqual(m.call(m.word(m.fops + 12)), len(_req))
 
     def test_native_success_paths_and_void_return(self):
         m, _ = self.machine()
@@ -153,8 +162,8 @@ class NotificationTests(unittest.TestCase):
         self.install_manager(m)
         self.assertEqual(len(m.notifications), 1, 'idempotent install must not notify twice')
         self.assertEqual(m.call(native_symbol(m, 'canopus_manager_native_notify_module_installed')), 0)
-        self.assertEqual([n['id'] for n in m.notifications], [0x43414E4F50555301, 0x43414E4F50555302])
-        self.assertEqual(m.notifications[0]['body'], 'Canopus 已加载！尽情享受吧～')
+        self.assertEqual([n['id'] for n in m.notifications], [0x43414E4F50555310, 0x43414E4F50555302])
+        self.assertEqual(m.notifications[0]['body'], 'Canopus 已加载，管理器可用。')
         self.assertEqual(m.notifications[1]['body'], '新模块已安装但处于禁用状态。打开 Canopus 管理器即可启用。')
         for message in m.notifications:
             self.assertEqual(message['title'], 'Canopus')
@@ -198,7 +207,7 @@ class NotificationTests(unittest.TestCase):
         stored = fw.stored()
         self.assertEqual(len(stored), 2)
         for index, (uid, body) in enumerate([
-            (0x43414E4F50555301, 'Canopus 已加载！尽情享受吧～'),
+            (0x43414E4F50555310, 'Canopus 已加载，管理器可用。'),
             (0x43414E4F50555302, '新模块已安装但处于禁用状态。打开 Canopus 管理器即可启用。'),
         ]):
             self.assert_firmware_message(m, fw.events[index], uid, body)
@@ -213,6 +222,32 @@ class NotificationTests(unittest.TestCase):
         self.assertNotEqual(m.word(fw.events[0] + 92), m.word(fw.events[1] + 92))
         # The borrowed context survives normalization cleanup and later reads.
         self.assertEqual(m.word(fw.events[1] + 92), m.word(fw.events[2] + 92))
+
+    def test_service_notification_carries_module_source_title_and_body(self):
+        m, fw = self.machine(real=True)
+        source, title, body, icon = 0x200d9100, 0x200d9120, 0x200d9140, 0x200d9180
+        m.uc.mem_write(source, b'mod.portable\0')
+        m.uc.mem_write(title, b'Custom title\0')
+        m.uc.mem_write(body, '来自模块的通知'.encode() + b'\0')
+        m.uc.mem_write(icon, b'/data/app/custom.bin\0')
+        # The first notice keeps the Canopus icon (no path), the second names one.
+        for pointer_to_icon in (0, icon):
+            m.uc.reg_write(UC_ARM_REG_R1, title)
+            m.uc.reg_write(UC_ARM_REG_R2, body)
+            m.uc.reg_write(UC_ARM_REG_R3, pointer_to_icon)
+            self.assertEqual(m.call(native_symbol(m, 'canopus_manager_native_notify'), source), 0)
+        self.assertEqual(len(fw.events), 2)
+        self.assertEqual(len(fw.reminders), 2)
+        uids = [struct.unpack('<Q', m.uc.mem_read(e, 8))[0] for e in fw.events]
+        self.assertEqual(uids, [0x43414E4F50555310, 0x43414E4F50555311])
+        for pointer, icon_path in zip(fw.events, ('/data/canopus/manager_icon.bin', '/data/app/custom.bin')):
+            self.assertEqual(m.string(m.word(pointer + 28)), icon_path)
+            self.assertEqual(m.string(m.word(pointer + 32)), icon_path)
+            self.assertEqual(m.string(m.word(pointer + 12)), 'Custom title')
+            self.assertEqual(m.string(m.word(pointer + 16)), 'mod.portable')
+            self.assertEqual(m.string(m.word(pointer + 20)), '来自模块的通知')
+            self.assertEqual(bytes(m.uc.mem_read(m.word(pointer + 92), 16)), bytes(16))
+        self.assertNotEqual(m.word(fw.events[0] + 92), m.word(fw.events[1] + 92))
 
     def test_old_null_context_reproduces_crash3_pc(self):
         m, fw = self.machine(real=True)

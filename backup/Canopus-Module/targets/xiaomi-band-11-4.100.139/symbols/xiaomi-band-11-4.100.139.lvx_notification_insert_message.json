@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "symbol_id": "xiaomi-band-11-4.100.139.lvx_notification_insert_message",
+  "target_id": "xiaomi-band-11-4.100.139",
+  "name": "lvx_notification_insert_message",
+  "kind": "function",
+  "entry_address": "0xc8f2bb0",
+  "callable_address": "0xc8f2bb1",
+  "instruction_set": "thumb",
+  "prototype": "void(const firmware_notification_message *message)",
+  "calling_convention": "arm-aapcs",
+  "contexts": {
+    "allowed": [
+      "notification_owner",
+      "system_app_lifecycle_callback"
+    ],
+    "blocking": false
+  },
+  "ownership": {
+    "return_value": "void; r0 is residue from freeing the temporary normalized message, not delivery status"
+  },
+  "side_effects": [
+    "allocates_and_inserts_notification_record",
+    "may_start_reminder",
+    "may_emit_notification_event_34",
+    "schedules_notification_timer"
+  ],
+  "proof": {
+    "static": "recovered",
+    "evidence_ids": [
+      "EVID-NOTIFICATION-4139-001",
+      "EVID-NOTIFICATION-4139-002"
+    ],
+    "device": "not_probed"
+  },
+  "policy": "restricted",
+  "status": "STATIC_RECOVERED",
+  "provenance": {
+    "firmware_sha256": "31ce82257f7c127950dc5070b86316730cf468a41f0d004559e41e7d923b2c74",
+    "evidence_ids": [
+      "EVID-NOTIFICATION-4139-001",
+      "EVID-NOTIFICATION-4139-002"
+    ],
+    "source": "Exact .139 string xref to lvx_notification_insert_message at 0x2cb068ab, verified against notification clone/insertion/reminder code and stock activity/weather callers."
+  },
+  "notes": "Replaces false ensemble match 0xc370ad0 (NSH /proc/memdump command). Requires the .139 96-byte message with start_reminder at +88, not the 10 Pro 88-byte layout. Native Manager uses this only from the existing miwear/UI-owner install paths after identity validation. General SDK exposure remains pending a hardware probe; no reliable delivery result is returned. Crash3 consumer audit: reminders require a non-null 16-byte user context at message+92 even when is_focus (+90) is zero; context is borrowed, not deep-copied. See EVID-NOTIFICATION-4139-002.",
+  "approval_state": "PENDING"
+}

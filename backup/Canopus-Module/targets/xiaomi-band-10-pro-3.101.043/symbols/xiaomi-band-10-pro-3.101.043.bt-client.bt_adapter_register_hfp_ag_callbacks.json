@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "symbol_id": "xiaomi-band-10-pro-3.101.043.bt_adapter_register_hfp_ag_callbacks",
+  "target_id": "xiaomi-band-10-pro-3.101.043",
+  "name": "bt_adapter_register_hfp_ag_callbacks",
+  "kind": "function",
+  "instruction_set": "thumb",
+  "prototype": "int(void *, const void *)",
+  "proof": {
+    "static": "confirmed",
+    "device": "not_probed",
+    "evidence_ids": [
+      "EVID-BT-1043-MISC-001"
+    ]
+  },
+  "policy": "forbidden",
+  "status": "FORBIDDEN",
+  "provenance": {
+    "firmware_sha256": "519307675665e4866d722a8119a98589c397b614ac3294cb87bfc86de45756ec",
+    "source": "exact 3.101.043 IDB vela_ap.bin.i64; exact adapter+0x98 registration-state lifecycle and register flow",
+    "evidence_ids": [
+      "EVID-BT-1043-MISC-001"
+    ]
+  },
+  "entry_address": "0xc3b0ce0",
+  "callable_address": "0xc3b0ce1",
+  "notes": "Exact HFP-AG registration identity is recovered, but callback-table field ABI and supported lifecycle are not exposed; the callable remains forbidden.",
+  "approval_state": "REJECTED"
+}

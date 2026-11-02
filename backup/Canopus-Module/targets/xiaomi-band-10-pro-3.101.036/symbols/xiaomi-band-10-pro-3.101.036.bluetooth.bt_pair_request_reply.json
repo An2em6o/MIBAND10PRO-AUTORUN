@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "symbol_id": "xiaomi-band-10-pro-3.101.036.bluetooth.bt_pair_request_reply",
+  "target_id": "xiaomi-band-10-pro-3.101.036",
+  "name": "bt_pair_request_reply",
+  "kind": "function",
+  "instruction_set": "thumb",
+  "entry_address": "0x0C39994C",
+  "callable_address": "0x0C39994D",
+  "prototype": "int32(void *, const uint8_t *, int32_t)",
+  "calling_convention": "arm-aapcs",
+  "contexts": {
+    "allowed": [
+      "native_module_bluetooth_client"
+    ],
+    "blocking": false
+  },
+  "proof": {
+    "static": "confirmed",
+    "device": "not_probed",
+    "evidence_ids": [
+      "EVID-BT-PAIR-REPLY-002"
+    ]
+  },
+  "policy": "native-full-trust",
+  "status": "STATIC_RECOVERED",
+  "provenance": {
+    "firmware_sha256": "662d67f5e247e31e194d3161024890ba93b9d29d70b290fadb9aac8ce8ec3c81",
+    "evidence_ids": [
+      "EVID-BT-PAIR-REPLY-002"
+    ],
+    "source": "Exact 3.101.036 IDA: stock gap_pair_request_callback sub_C6E1ECC directly calls sub_C39994C(adapter, address, accepted); command 97 distinguishes reply from command-94 create bond."
+  },
+  "approval_state": "APPROVED",
+  "promotion": {
+    "reviewer": "canopus-maintainer",
+    "date": "2026-08-11",
+    "firmware_sha256": "662d67f5e247e31e194d3161024890ba93b9d29d70b290fadb9aac8ce8ec3c81",
+    "prototype": "int32(void *, const uint8_t *, int32_t)",
+    "ownership": "borrowed firmware object/address arguments",
+    "thread": "Bluetooth client context",
+    "device_probe": "pending after regenerated module"
+  },
+  "notes": "Replies to an inbound Pair Request through Bluetooth client command 97. The former 0x0C39989C candidate is command-94 create bond and is invalid for this API."
+}

@@ -44,12 +44,10 @@ canopus-target-private generated metadata/raw bindings
 ## 当前已落地
 
 ```sh
-python3 tools/generate_target_private_symbols.py \
-  --target-id xiaomi-band-10-pro-3.101.036 \
-  --symbols-dir targets/xiaomi-band-10-pro-3.101.036/symbols \
-  --generated-rust sdk/rust/canopus-target-generated/src/generated_1036.rs \
-  --output sdk/rust/canopus-target-private/src/generated_symbols_1036.rs
+cargo run -p canopus-cli -- target generate xiaomi-band-10-pro-3.101.036
 ```
+
+（`family.private_symbols = true` 的 target 会同时产出 `generated_symbols_<rust_module>.rs`。）
 
 该生成器当前输出：
 
@@ -59,7 +57,7 @@ python3 tools/generate_target_private_symbols.py \
 - status、policy 和 prototype metadata；
 - 可由 prototype records 解析出的 target-private raw wrappers；
 
-036 backend 已经通过 `generated_symbols::TARGET_ID` 使用生成的 generated identity；043 backend 也使用独立的 `generated_symbols_1043.rs` 和 043 firmware SHA-256。`scripts/ci.sh` 会在 SDK 测试前重新生成 036/043 两份 metadata 并进行 byte-for-byte 比较，防止 generated metadata 被手工修改后漂移。
+036 backend 已经通过 `generated_symbols::TARGET_ID` 使用生成的 generated identity；043 backend 也使用独立的 `generated_symbols_xiaomi_band_10_pro_3_101_043.rs` 和 043 firmware SHA-256。`scripts/ci.sh` 会在 SDK 测试前重新生成 036/043 两份 metadata 并进行 byte-for-byte 比较，防止 generated metadata 被手工修改后漂移。
 
 ## 下一阶段
 

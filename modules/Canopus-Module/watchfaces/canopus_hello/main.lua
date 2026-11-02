@@ -9,14 +9,10 @@ local DEVICE_PATH = "/dev/canopus"
 local RECEIPT_RESOURCE = SCRIPT_PATH .. "receipt.bin"
 local MODULE_RESOURCE = SCRIPT_PATH .. "module.bin"
 local INBOX = "/data/canopus/inbox/"
-local RECEIPT_PATH = INBOX .. TOKEN .. ".cmi"
-local MODULE_PATH = INBOX .. TOKEN .. ".ko"
+local RECEIPT_PATH = INBOX .. TOKEN .. ".cmi.next"
+local MODULE_PATH = INBOX .. TOKEN .. ".ko.next"
 local CPC2_MAGIC = 0x43504332
-local CPC1_MAGIC = 0x43504331
-local CPS1_MAGIC = 0x43505331
 local CMD_INSTALL = 2
-local SUP_CMD_QUERY = 0x43510001
-local DIAG_QUERY_MAGIC = 0x43514431
 local HEADER_SIZE = 36
 local RESULT_COMPLETED = 5
 
@@ -85,9 +81,9 @@ end
 local function stage_files()
     local receipt = read_all(RECEIPT_RESOURCE)
     local module = read_all(MODULE_RESOURCE)
-    if type(receipt) ~= "string" or #receipt ~= 256
-        or u32(receipt, 0) ~= 0x31494D43 then
-        return false, "Missing or invalid signed receipt"
+    if type(receipt) ~= "string" or #receipt ~= 176
+        or u32(receipt, 0) ~= 0x32494D43 then
+        return false, "Missing or invalid receipt"
     end
     if type(module) ~= "string" or #module < 512 or #module > 262144
         or module:sub(1, 4) ~= "\127ELF" then
@@ -115,8 +111,9 @@ local function stage_files()
 end
 
 local function supervisor_error()
-    local query = word(CPC1_MAGIC) .. word(SUP_CMD_QUERY)
-        .. word(DIAG_QUERY_MAGIC) .. word(0)
+    -- CPC2 QUERY_DEVICE (9): 36-byte header + 36-byte payload, error at payload+24.
+    local query = word(CPC2_MAGIC) .. half(HEADER_SIZE) .. half(1) .. half(2) .. half(0)
+        .. word(HEADER_SIZE) .. word(9) .. word(0x7FFF) .. word(0) .. word(0) .. word(0)
     local device = io.open(DEVICE_PATH, "wb")
     if not device then return nil end
     local ok, result = pcall(device.write, device, query)
@@ -127,13 +124,13 @@ local function supervisor_error()
     end
     device = io.open(DEVICE_PATH, "rb")
     if not device then return nil end
-    local status_record = device:read(384)
+    local record = device:read(HEADER_SIZE + 36)
     pcall(device.close, device)
-    if type(status_record) ~= "string" or #status_record ~= 384
-        or u32(status_record, 0) ~= CPS1_MAGIC then
+    if type(record) ~= "string" or #record ~= HEADER_SIZE + 36
+        or u32(record, 0) ~= CPC2_MAGIC then
         return nil
     end
-    local error = u32(status_record, 32)
+    local error = u32(record, HEADER_SIZE + 24)
     if error >= 0x80000000 then error = error - 0x100000000 end
     return error
 end
@@ -144,18 +141,18 @@ local function install()
     local payload = TOKEN .. "\0"
     local total = HEADER_SIZE + #payload
     local request = word(CPC2_MAGIC) .. half(HEADER_SIZE) .. half(1)
-        .. half(1) .. half(0) .. word(total) .. word(CMD_INSTALL)
+        .. half(2) .. half(0) .. word(total) .. word(CMD_INSTALL)
         .. word(1) .. word(0) .. word(0) .. word(#payload) .. payload
     local device = io.open(DEVICE_PATH, "wb")
     if not device then fail("Canopus Manager is not installed") return end
     local write_ok, write_result, write_error = pcall(device.write, device, request)
-    local close_ok, close_result = pcall(device.close, device)
     -- Firmware bindings may return a byte count; stock Lua returns the file
     -- handle on a complete write and nil on an I/O failure. Enforce exactness
     -- whenever the binding exposes a count without rejecting stock semantics.
+    -- A character device reports no close status, so close carries no signal.
+    pcall(device.close, device)
     local short_write = type(write_result) == "number" and write_result ~= #request
-    if not write_ok or write_result == nil or short_write
-        or not close_ok or close_result == nil then
+    if not write_ok or write_result == nil or short_write then
         fail(write_error or "Supervisor write failed") return
     end
 
@@ -173,7 +170,7 @@ local function install()
         or u32(response, 0) ~= CPC2_MAGIC
         or u16(response, 4) ~= HEADER_SIZE
         or u16(response, 6) ~= 2
-        or u16(response, 8) ~= 1
+        or u16(response, 8) ~= 2
         or u16(response, 10) ~= 0
         or u32(response, 12) ~= HEADER_SIZE
         or u32(response, 16) ~= CMD_INSTALL
@@ -183,7 +180,7 @@ local function install()
         fail("Invalid supervisor response") return
     end
     local result = u32(response, 28)
-    if result ~= RESULT_COMPLETED then
+    if result ~= RESULT_COMPLETED and result ~= 8 then
         local error = supervisor_error()
         local detail = error and " (error " .. tostring(error) .. ")" or ""
         fail("Supervisor result " .. tostring(result) .. detail)

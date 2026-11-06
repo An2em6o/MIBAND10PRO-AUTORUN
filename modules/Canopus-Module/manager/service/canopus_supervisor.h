@@ -86,6 +86,7 @@ enum canopus_sup_command {
     CANOPUS_SUP_CMD_SCAN,
     /* Leave safe mode at the next boot; arg0 is a canopus_safe_exit_action. */
     CANOPUS_SUP_CMD_EXIT_SAFE_MODE,
+    CANOPUS_SUP_CMD_OPEN_MANAGER,
 };
 
 /* Stable supervisor error codes (CAN-P1-008). `error_code` holds the
@@ -461,7 +462,6 @@ int canopus_supervisor_watch_stability(struct canopus_supervisor_v1 *sup);
 /* Registers the Supervisor's work on the owner timer that keeps ticking while
  * the screen is off; safe to call from any task. */
 int canopus_supervisor_start_background(struct canopus_supervisor_v1 *sup);
-/* Starts the LVGL-owner heartbeat used by deferred boot registration. */
 int canopus_supervisor_start_foreground(struct canopus_supervisor_v1 *sup);
 void canopus_supervisor_boot_ready(struct canopus_supervisor_v1 *sup);
 void canopus_supervisor_boot_notify(struct canopus_supervisor_v1 *sup);
@@ -525,6 +525,9 @@ uint32_t canopus_supervisor_scan_packages(struct canopus_supervisor_v1 *sup);
  * Returns 0 on success; a failure leaves the in-memory table authoritative
  * for the current session but the change will not survive reboot. */
 int canopus_supervisor_save_registry(struct canopus_supervisor_v1 *sup);
+/* Wire image of the slot table, without persisting it. */
+int canopus_supervisor_serialize_registry(struct canopus_supervisor_v1 *sup,
+                                          uint8_t *buf, uint32_t len);
 /* Restore the slot table from the platform `restore` hook. Absence of a
  * registry (fresh install) is not an error. Enabled intents are loaded via
  * the platform `load_module` hook; remove intents have their artifacts

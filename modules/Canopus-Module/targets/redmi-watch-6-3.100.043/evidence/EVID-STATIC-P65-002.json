@@ -1,0 +1,228 @@
+{
+  "schema": 1,
+  "evidence_id": "EVID-STATIC-P65-002",
+  "target_id": "redmi-watch-6-3.100.043",
+  "question": "Which REDMI Watch 6 3.100.043 entries are the NuttX VFS, app-registry and page-manager functions the staged Supervisor needs?",
+  "method": "Manual review of the exact 3.100.043 IDB (fwbins/xiaomi-p65-3.100.043/vela_ap.bin.i64, sha256 a19b6014\u20265858): each entry was decompiled and checked against the reviewed 3.1.28/3.1.190 semantics, its assert/log string, and its callee shapes. Addresses are the SRAM/PSRAM-resident bodies; several XIP copies are thunks (`0xc8beaf0 -> 0x1c158720`, `0xc8bef00 -> 0x1c1580e4`).",
+  "findings": [
+    {
+      "name": "open",
+      "entry": "0x1c1580e4",
+      "anchor": "va_list path resolution (sub_1C157D24, 'vfs/fs_open.c'), fd allocation sub_1C154300, errno set through sub_1C168478. Sibling 0x1c158074 is the same path without the errno store."
+    },
+    {
+      "name": "close",
+      "entry": "0x1c154c40",
+      "anchor": "file table lookup (inode/fs_files.c:1006 assert), fd range check, reference decrement and last-reference release. SUPERSEDED: this body is not the entry the VFS publishes; see the close (correction) finding below."
+    },
+    {
+      "name": "close (correction)",
+      "entry": "0x1c154d9c",
+      "anchor": "Syscall table at 0xc4a96c4 lists 0x1c1580e5 (open), 0x1c154d9d, 0x1c158721 (read), 0x1c159a2d. Calling 0x1c154d9d on a live fd returns 0 and a second call returns -1, while 0x1c154c40 resets the device (EVID-EMU-65043-002)."
+    },
+    {
+      "name": "read",
+      "entry": "0x1c158720",
+      "anchor": "'vfs/fs_read.c' assert at line 70, fs_getfilep 0x1c154700, readable-flag check, dispatch through inode->ops[+8] (file_read 0x1c158790), errno on failure."
+    },
+    {
+      "name": "write",
+      "entry": "0x1c158690",
+      "anchor": "Same wrapper shape as read: fs_getfilep 0x1c154700, writable-flag check, dispatch through inode->ops[+12] (file_write 0x1c159a90), errno on failure. SUPERSEDED: no code in the image references this body; see the write (correction) finding below."
+    },
+    {
+      "name": "write (correction)",
+      "entry": "0x1c159a2c",
+      "anchor": "The dispatch table at 0xc4a96c4 publishes 0x1c159a2d as the write slot after open/close/read, and 0x1c159a2c has eight code callers (libc write paths). Calling 0x1c158690 on a writable descriptor returns -1 with errno 22 (EINVAL), which blocked the registry write (EVID-EMU-65043-004)."
+    },
+    {
+      "name": "unlink",
+      "entry": "0x1c159824",
+      "anchor": "'vfs/fs_unlink.c' assert; path lookup, inode type checks, driver/mount unlink dispatch, inode_lock 0x1c154f50 + fs_inoderemove 0x1c1557b4 + unlock."
+    },
+    {
+      "name": "rename",
+      "entry": "0x1c1587c8",
+      "anchor": "'vfs/fs_rename.c' assertions in the two-path resolution body."
+    },
+    {
+      "name": "opendir",
+      "entry": "0xc4f7884",
+      "anchor": "malloc(104) for the DIR (errno 12 when it fails), then open(path, 0xC01) (O_RDONLY|O_DIRECTORY) through the 0xc8bef00 open thunk; a negative fd frees the DIR and returns NULL with the errno open stored, and a success stores the fd at dir+0."
+    },
+    {
+      "name": "readdir",
+      "entry": "0xc4f78ec",
+      "anchor": "Fills a 98-byte dirent at dir+1 through the readdir helper called at 0xc8beaf0 and returns dir+1; NULL at end of stream. The returned pointer is dir+1, so d_name sits at +1."
+    },
+    {
+      "name": "closedir",
+      "entry": "0xc4f78c0",
+      "anchor": "NULL dir returns -1 with errno 9 (EBADF); otherwise close(dir->fd) through the 0xc8bdba8 thunk, free the DIR with the default-heap free 0xc50b25c, and return the close result."
+    },
+    {
+      "name": "errno_location",
+      "entry": "0xc4f793c",
+      "anchor": "Returns TLS pointer +40 or the static errno slot 0x3c3e... \u2014 the NuttX get_errno_ptr shape; every libc wrapper above stores through it."
+    },
+    {
+      "name": "app_lookup",
+      "entry": "0x1c151108",
+      "anchor": "Walks the registered-app list at off_3C3CF91C comparing the 16-bit app id at +16; returns the descriptor or 0."
+    },
+    {
+      "name": "app_install",
+      "entry": "0x1c151ae4",
+      "anchor": "'app_install' log tag; copies the 64-byte descriptor, clones strings, appends to off_3C3CF91C, allocates and registers the page array, emits event 27."
+    },
+    {
+      "name": "page_goto",
+      "entry": "0x1c132f4c",
+      "anchor": "'pagemanager' / 'goto_page_no_check_stacktop' log strings; page-stack lookup and transition through sub_1C132B7C/sub_1C13218C."
+    },
+    {
+      "name": "page_finish",
+      "entry": "0x1c1325b8",
+      "anchor": "'finish_page' log string; page-stack top handling and release."
+    },
+    {
+      "name": "register_driver",
+      "entry": "0x1c15a954",
+      "anchor": "inode_lock, inode_reserve(path, mode, &node) 0x1c155888, fops stored at +16, type bits at +14 set to 1, private data at +24, unlock. Four arguments (path, fops, mode, private); the mode reaches inode_reserve, which does not consume it in this build."
+    },
+    {
+      "name": "unregister_driver",
+      "entry": "0x1c15aa18",
+      "anchor": "inode_lock + fs_inoderemove(path) 0x1c1557b4 + unlock."
+    },
+    {
+      "name": "lv_obj_class_create_obj",
+      "entry": "0x3775bc",
+      "anchor": "lv_obj_class.c assertions ('lv_obj_class_create_obj', 'No display created yet. No place to assign the new screen'); the class create occurs here, the init is 0x3776b0."
+    },
+    {
+      "name": "lv_obj_class_init_obj",
+      "entry": "0x3776b0",
+      "anchor": "called immediately after 0x3775bc by every widget create; base class 0x3c1de5c8."
+    },
+    {
+      "name": "lv_obj_create",
+      "entry": "0x387b78",
+      "anchor": "create helper with class 0x3c1de5c8 (base_class 0 = lv_obj_class) + init; followed by the lv_obj_class.c path string."
+    },
+    {
+      "name": "lv_label_create",
+      "entry": "0xc78bcb4",
+      "anchor": "create helper with class 0x3c224844; the same class struct appears in XIP rodata at 0xc3145b8 immediately before the lv_label.c source path and the 'Failed to allocate memory for dot_tmp_ptr' label string."
+    },
+    {
+      "name": "mpu_region_allocate",
+      "entry": "0xc0c017c",
+      "anchor": "BES region allocator over the 8-bit bitmap algn_3C489EAC, IRQ-masked, 255 when full."
+    },
+    {
+      "name": "mpu_region_configure",
+      "entry": "0xc9665e4",
+      "anchor": "Five-argument configure(region<=7, base 32-aligned, size>0x1F, access<=5, lock) computing RBAR/RLAR and writing RNR/RBAR/RLAR (0xE000ED98/9C/A0) through 0xc9665a0; called by the alloc-and-configure mpu_setup 0xc9666b0."
+    },
+    {
+      "name": "mpu_region_release",
+      "entry": "0xc966670",
+      "anchor": "Clears the bitmap bit for region<=7; the caller disables the hardware region (RNR/RLAR=0), which is what stage1 and the Supervisor unmap path do."
+    },
+    {
+      "name": "default heap",
+      "entry": "0xc50b2a0 / 0xc50b25c / 0xc50b2c8",
+      "anchor": "BES heap wrappers over the descriptor stored at 0x3c3d7e9c (dword_3C3D4F10[3043]); Mirage reads that slot as 0x3c57f980, i.e. the default heap lives in PSRAM - a Supervisor image allocated there executes through the 0x1c alias, so the p65 loader follows the Band 11 design (alias + explicit MPU lease), not the SRAM-resident Band 9 one."
+    },
+    {
+      "name": "lv_img_create",
+      "entry": "0xc78a960",
+      "anchor": "class 0x3c2242a0, ctor 0xc78a760 (src 0 at +0x34, rotation 0 at +0x48, scale 256 at +0x4c/+0x50), paired with 0xc78acf0 at all 65 call sites."
+    },
+    {
+      "name": "lv_bar_create",
+      "entry": "0xc784834",
+      "anchor": "class 0x3c223b58, ctor 0xc784798 sets max 100 at +0x3c and min/current 0 at +0x38/+0x34."
+    },
+    {
+      "name": "lv_label_set_text",
+      "entry": "0xc78c878",
+      "anchor": "(obj,text): NULL keeps +0x34, else free/strlen+1/alloc/copy into +0x34, clear flag bit 8 and refresh 0xc78c250; the label constructor calls it with \"\"."
+    },
+    {
+      "name": "lv_obj_set_size",
+      "entry": "0x378738",
+      "anchor": "style props 1/2 through 0x37d628 and 0x37ed10/0x37ed58; XIP thunk 0xc255ce4."
+    },
+    {
+      "name": "lv_obj_add_flag",
+      "entry": "0x387b98",
+      "anchor": "flags at +44 |= flag with HIDDEN/0x1800000 handling; thunk 0xc8be2f8."
+    },
+    {
+      "name": "lv_obj_clear_flag",
+      "entry": "0x387c44",
+      "anchor": "flags at +44 &= ~flag; thunk 0xc8bcca0."
+    },
+    {
+      "name": "lv_img_set_src",
+      "entry": "0xc78acf0",
+      "anchor": "source classified by 0xc71a084, stored at +0x34, width/height at +0x40/+0x44, scale/align modes."
+    },
+    {
+      "name": "lv_bar_set_range",
+      "entry": "0xc7849e4",
+      "anchor": "min +0x38 / max +0x3c with swap and current clamp."
+    },
+    {
+      "name": "lv_bar_set_value",
+      "entry": "0xc784850",
+      "anchor": "clamped into [min,max] at +0x34 with optional animation via 0xc73c190/0xc73c1c8."
+    },
+    {
+      "name": "lv_obj_align_to",
+      "entry": "0x37a580",
+      "anchor": "LV_ALIGN switch 1..21 with percentage offsets; thunk 0xc8be1b8."
+    },
+    {
+      "name": "lv_obj_add_event_cb",
+      "entry": "0x388098",
+      "anchor": "spec_attr allocation 0x387db8 then lv_event_add 0x3954e0; thunk 0xc8bce78."
+    },
+    {
+      "name": "lvx_page_title_create",
+      "entry": "0xc21b2fc",
+      "anchor": "logs 'lvx_page_title_create' and builds class 0x3c2a3318; the earlier candidate 0xc21b4b0 is the battery variant ('lvx_page_title_battery_create')."
+    },
+    {
+      "name": "launcher_load_app_info",
+      "entry": "0xc7ebd10",
+      "anchor": "log tag 'load_app_info', 24-byte entry allocation 0xc73e058, fills icon/name/id/flags."
+    },
+    {
+      "name": "launcher_page_insert_icon",
+      "entry": "0xc7f070c",
+      "anchor": "log tag 'launcher_page_insert_icon', requires launcher UI slot 0x3c456fa0, builds icon/label bindings."
+    },
+    {
+      "name": "launcher_reset_order_info",
+      "entry": "0xc7ecafc",
+      "anchor": "iterates the launcher list and rebuilds the order metadata; the firmware name string is 'launcher_reset_order_list'."
+    },
+    {
+      "name": "app_launcher_add",
+      "entry": "0xc7ec450",
+      "anchor": "log 'app_launcher_add' + 'add icon: %s'; lookup -> 0xc7ebd10 -> 0xc7f070c -> ordered-list insert."
+    }
+  ],
+  "limits": [
+    "Static review only: device is NOT_PROBED and no capability is claimed.",
+    "read/write/unlink/rename are the SRAM-resident originals; the XIP copies are thunks and must not be recorded as separate callables.",
+    "register_driver keeps the four-argument NuttX signature; a three-argument veneer call would leave private data undefined.",
+    "lv_memalign/lv_free wrappers over the default heap descriptor 0x3c3d4f10[3043] are located (0xc50b2c8 / 0xc50b25c) but not yet recorded.",
+    "The remaining LVGL setters (label text, image src, bar range/value, size, align, flags, event) and the image/bar create helpers are not resolved yet."
+  ],
+  "verdict": "STATIC_RECOVERED",
+  "created": "2026-10-25T04:20:00Z"
+}

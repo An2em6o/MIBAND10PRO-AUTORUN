@@ -94,7 +94,7 @@ static int sup_load_slot(struct canopus_supervisor_v1 *sup, uint32_t slot)
     m->version = version;
     m->lifecycle_class = lifecycle;
     st = sup_try_load_slot(sup, slot);
-    /* Set after the retry: loading clears the platform's last diagnostic. */
+    /* Set after the retry: it replaces the failed attempt's diagnostic. */
     if (st >= 0) {
         m->activation_error = (uint32_t)CANOPUS_SUP_ERR_UPDATE_FALLBACK;
         sup->error_code = CANOPUS_SUP_ERR_UPDATE_FALLBACK;
@@ -534,7 +534,9 @@ static int sup_safe_mode_allows(const struct canopus_supervisor_v1 *sup,
          * never staged here. */
         return stage_arg == 0 && arg0 <= 2u;
     case CANOPUS_SUP_CMD_RESTORE_AFTER_BOOT:
-        return 1; /* answers COMPLETED without activating anything */
+        return 1;
+    case CANOPUS_SUP_CMD_OPEN_MANAGER:
+        return 1;
     case CANOPUS_SUP_CMD_ENABLE:
     case CANOPUS_SUP_CMD_UPDATE:
     case CANOPUS_SUP_CMD_SCAN:
@@ -612,6 +614,12 @@ static uint32_t sup_dispatch(struct canopus_supervisor_v1 *sup, uint32_t op,
         } else if (sup->platform && sup->platform->stage_package) {
             staged = sup->platform->stage_package(sup->platform_cookie,
                                                   stage_arg, arg0);
+            /* A platform may already have recorded a specific code (for
+             * example a duplicate/downgrade rejection). -1 is the generic
+             * failure and falls through to CANOPUS_SUP_ERR_STAGE below. */
+            if (staged < -1 && sup->error_code == CANOPUS_SUP_ERR_NONE) {
+                sup->error_code = (uint32_t)staged;
+            }
             rc = staged < 0 ? CANOPUS_RESULT_FAILED
                  : staged == 1 ? CANOPUS_RESULT_REBOOT_REQUIRED
                                : CANOPUS_RESULT_COMPLETED;
@@ -735,6 +743,26 @@ static uint32_t sup_dispatch(struct canopus_supervisor_v1 *sup, uint32_t op,
             break;
         }
         module = &sup->modules[slot];
+        /* A disable/enable round trip rewrites the state word while the code
+         * stays resident (enable never unloads), so the record reads ENABLED
+         * for a module that is already running. Loading it again fails with
+         * "already inserted" and marks a live module failed, so report the
+         * resident state instead. */
+        if (module->descriptor != 0 &&
+            module->state == CANOPUS_STATE_ENABLED &&
+            module->intent == CANOPUS_SUP_INTENT_ENABLED) {
+            module->state = module->lifecycle_class == CANOPUS_LIFECYCLE_REMOVABLE
+                                ? CANOPUS_STATE_ACTIVE
+                                : CANOPUS_STATE_BOOT_RESIDENT;
+            module->activation_error = 0u;
+            rc = CANOPUS_RESULT_COMPLETED;
+            canopus_supervisor_module_changed(sup, (uint32_t)slot);
+            if (canopus_supervisor_save_registry(sup) != 0) {
+                sup->error_code = CANOPUS_SUP_ERR_REGISTRY;
+                rc = CANOPUS_RESULT_FAILED;
+            }
+            break;
+        }
         if ((module->state == CANOPUS_STATE_INSTALLED ||
              module->state == CANOPUS_STATE_ENABLED) &&
             module->intent == CANOPUS_SUP_INTENT_ENABLED) {
@@ -794,6 +822,13 @@ static uint32_t sup_dispatch(struct canopus_supervisor_v1 *sup, uint32_t op,
 
     case CANOPUS_SUP_CMD_SCAN:
         rc = canopus_supervisor_scan_packages(sup);
+        break;
+
+    case CANOPUS_SUP_CMD_OPEN_MANAGER:
+        rc = (sup->platform != 0 && sup->platform->open_manager != 0)
+                 ? (sup->platform->open_manager(sup->platform_cookie) == 0
+                        ? CANOPUS_RESULT_COMPLETED : CANOPUS_RESULT_FAILED)
+                 : CANOPUS_RESULT_DISALLOWED;
         break;
 
     case CANOPUS_SUP_CMD_ENTER_SAFE_MODE:
@@ -1024,6 +1059,8 @@ static uint32_t v2_to_sup_cmd(uint32_t cmd)
         return CANOPUS_SUP_CMD_INSTALL;
     case CANOPUS_CMD_RESTORE_AFTER_BOOT:
         return CANOPUS_SUP_CMD_RESTORE_AFTER_BOOT;
+    case CANOPUS_CMD_OPEN_MANAGER:
+        return CANOPUS_SUP_CMD_OPEN_MANAGER;
     default:
         return 0; /* unknown command */
     }
@@ -1170,6 +1207,16 @@ int canopus_supervisor_handle_v2_request(struct canopus_supervisor_v1 *sup,
          (req->command - (uint32_t)CANOPUS_CMD_STAGE_BEGIN)) & 1u) {
         rc = canopus_supervisor_upload(sup, req->command, payload, req->payload_size);
         canopus_proto_response_init(resp, req->request_id, rc, 0u);
+        return 0;
+    }
+    if (req->command == CANOPUS_CMD_PUBLISH_LAUNCHER) {
+        /* Like a query it leaves the last-operation record (pending op/state,
+         * error code) alone: the installer face repeats it on a timer. */
+        rc = (sup->platform != 0 && sup->platform->publish_launcher != 0)
+                 ? (sup->platform->publish_launcher(sup->platform_cookie) == 0
+                        ? CANOPUS_RESULT_COMPLETED : CANOPUS_RESULT_FAILED)
+                 : CANOPUS_RESULT_DISALLOWED;
+        canopus_proto_response_init(resp, req->request_id, rc, 0);
         return 0;
     }
     op = v2_to_sup_cmd(req->command);
@@ -1887,15 +1934,14 @@ uint32_t canopus_supervisor_scan_packages(struct canopus_supervisor_v1 *sup)
 
 /* ---- CAN-P0-005 revision: next-boot registry persistence ------------ */
 
-int canopus_supervisor_save_registry(struct canopus_supervisor_v1 *sup)
+int canopus_supervisor_serialize_registry(struct canopus_supervisor_v1 *sup,
+                                          uint8_t *buf, uint32_t len)
 {
-    uint8_t buf[CANOPUS_SUP_REGISTRY_SIZE];
     uint32_t i;
-    int rc;
-    if (sup == 0 || sup->platform == 0 || sup->platform->persist == 0) {
+    if (sup == 0 || buf == 0 || len < CANOPUS_SUP_REGISTRY_SIZE) {
         return -1;
     }
-    canopus_memset(buf, 0, sizeof(buf));
+    canopus_memset(buf, 0, CANOPUS_SUP_REGISTRY_SIZE);
     put_wire_u32(buf, 0u, CANOPUS_SUP_REGISTRY_MAGIC);
     put_wire_u32(buf, 4u, CANOPUS_SUP_REGISTRY_VERSION);
     put_wire_u32(buf, 8u, sup->module_count);
@@ -1917,6 +1963,18 @@ int canopus_supervisor_save_registry(struct canopus_supervisor_v1 *sup)
                          ((uint32_t)m->native_app_id << 16));
         }
     }
+    return 0;
+}
+
+int canopus_supervisor_save_registry(struct canopus_supervisor_v1 *sup)
+{
+    uint8_t buf[CANOPUS_SUP_REGISTRY_SIZE];
+    int rc;
+    if (sup == 0 || sup->platform == 0 || sup->platform->persist == 0) {
+        return -1;
+    }
+    rc = canopus_supervisor_serialize_registry(sup, buf, sizeof(buf));
+    if (rc != 0) return rc;
     rc = sup->platform->persist(sup->platform_cookie, buf, sizeof(buf));
     if (rc == 0) sup->boot_saved = wire_u32(buf + 12u);
     return rc;
@@ -1928,7 +1986,11 @@ int canopus_supervisor_save_registry(struct canopus_supervisor_v1 *sup)
 static int sup_restore_registry(struct canopus_supervisor_v1 *sup,
                                 int load_enabled_modules)
 {
-    uint8_t buf[CANOPUS_SUP_REGISTRY_SIZE];
+    /* The boot constructor runs on the firmware exec task's stack (3.1.28):
+     * a 784 B frame here plus the platform path buffers overflows it and the
+     * next screen sleep resets the SoC. The restore is a single-threaded boot
+     * step, so the buffer lives with the Supervisor image. */
+    static uint8_t buf[CANOPUS_SUP_REGISTRY_SIZE];
     uint32_t i, native_ids = 0u;
     int rc;
     if (sup == 0 || sup->platform == 0 || sup->platform->restore == 0) {

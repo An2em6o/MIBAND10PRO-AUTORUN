@@ -68,8 +68,19 @@ python3 "$ROOT/scripts/generate_boot_config.py" "$TARGET_ID" "$OUT/canopus_boot_
 TARGET_FLAGS="--target=arm-none-eabi -mcpu=cortex-m33 -mthumb -mfloat-abi=soft \
   -ffreestanding -fno-common -fno-builtin -fno-jump-tables \
   -fno-stack-protector -fno-unwind-tables -fno-asynchronous-unwind-tables \
-  -fdata-sections -fno-function-sections -Os -Wall -Wextra -Werror \
+  -fdata-sections -fno-function-sections ${CANOPUS_SUP_OPT:--Os} -Wall -Wextra -Werror \
   $TARGET_DEFINES ${CANOPUS_SUP_EXTRA_DEFINES:-}"
+# The v8 Manager app descriptor layout differs between the 3.1.32 generation
+# and 3.1.190: the latter's launcher_load_app_info reads the metadata callback
+# at +0x1c. Select the 3.1.190 layout for targets whose IDB proved it.
+case "$TARGET_ID" in
+    xiaomi-band-9-pro-3.1.190)
+        TARGET_FLAGS="$TARGET_FLAGS -DCANOPUS_MGR_APPINFO_190 -DCANOPUS_MGR_SCREEN_WIDTH=336 -DCANOPUS_MGR_TITLE_USER_DATA -DCANOPUS_MGR_PAGE_ROOT_SLOT=0x2c -DCANOPUS_MGR_TEXT_FONT_PROP=0x57" ;;
+    xiaomi-band-10-3.1.28)
+        TARGET_FLAGS="$TARGET_FLAGS -DCANOPUS_MGR_APPINFO_1028 -DCANOPUS_MGR_SCREEN_WIDTH=212" ;;
+    xiaomi-band-9-3.1.32)
+        TARGET_FLAGS="$TARGET_FLAGS -DCANOPUS_MGR_SCREEN_WIDTH=192 -DCANOPUS_MGR_TITLE_PLAIN -DCANOPUS_MGR_PAGE_ROOT_SLOT=0x2c -DCANOPUS_MGR_TEXT_FONT_PROP=0x57" ;;
+esac
 
 INC="-I$OUT -I$ROOT/sdk/c -I$ROOT/runtime/lifecycle -I$ROOT/runtime/resources \
   -I$ROOT/runtime/diagnostics -I$ROOT/runtime/control -I$ROOT/runtime/module \
@@ -84,7 +95,21 @@ INC="-I$OUT -I$ROOT/sdk/c -I$ROOT/runtime/lifecycle -I$ROOT/runtime/resources \
 # shared v9 UI host does not apply. Everything else still links the runtime.
 UI_HOST_SRC="manager/target/canopus_ui_host.c"
 UI_HOST_OBJECT="$OUT/canopus_ui_host.o"
-if [ "$PROD_FAMILY" = xiaomi-band-9 ]; then
+IS_STAGED_V8=0
+IS_STAGED_LOADER=0
+case "$PROD_FAMILY" in
+    xiaomi-band-9|xiaomi-band-9-pro|xiaomi-band-10) IS_STAGED_V8=1 ;;
+esac
+# Families whose installer ships the NSH-mw stage1/stage2 chain. The REDMI
+# Watch 6 uses the same loader but the v9 UI host, so it is staged here
+# without selecting the v8 backend.
+case "$PROD_FAMILY" in
+    xiaomi-band-9|xiaomi-band-9-pro|xiaomi-band-10|redmi-watch) IS_STAGED_LOADER=1 ;;
+esac
+if [ "$IS_STAGED_V8" = 0 ]; then
+    TARGET_FLAGS="$TARGET_FLAGS -DCANOPUS_SUP_UI_HOST_POLL"
+fi
+if [ "$IS_STAGED_V8" = 1 ]; then
     UI_HOST_SRC=""
     UI_HOST_OBJECT=""
 fi
@@ -121,12 +146,19 @@ for s in \
     # size within the unchanged Supervisor file/resident budgets.
     SOURCE_FLAGS=""
     [ "$s" != manager/target/canopus_ui_host.c ] || SOURCE_FLAGS="-Oz"
+    # Page transitions are infrequent. Keep the lifecycle callbacks and deferred
+    # navigation within the same production file/resident budgets.
+    [ "$s" != manager/target/canopus_manager_target.c ] || SOURCE_FLAGS="-Oz"
     # Likewise the L2 transport and owner pump: the deep request ring would otherwise take
     # .155 past its file budget.
     [ "$s" != manager/service/canopus_supervisor_l2.c ] || SOURCE_FLAGS="-Oz"
     # And the staging/upload path (not a hot one): with package resources (CPC2 26-28) the .043
     # Supervisor no longer fits its resident budget otherwise.
     [ "$s" != manager/service/canopus_supervisor_upload.c ] || SOURCE_FLAGS="-Oz"
+    # And the pinned-start writer with the platform wrappers (thin firmware calls): with the
+    # flash-HAL writer enabled, Band 11 4.100.155/.179 exceed their file budget otherwise.
+    [ "$s" != manager/service/canopus_supervisor_boot.c ] || SOURCE_FLAGS="-Oz"
+    [ "$s" != manager/service/canopus_supervisor_platform.c ] || SOURCE_FLAGS="-Oz"
     $CC $TARGET_FLAGS $SOURCE_FLAGS $INC -c "$ROOT/$s" -o "$OUT/${base%.c}.o"
 done
 
@@ -161,7 +193,7 @@ ld.lld -r -T "$ROOT/scripts/canopus_supervisor_sections.ld" \
 # Both loaders retain relocation targets, global exports and constructors, but
 # do not consume debug/local metadata or C unwind tables. Strip only unreferenced
 # symbols; --strip-all would remove symbol tables the ELF loaders require.
-if [ "$PROD_FAMILY" = xiaomi-band-10-pro ] || [ "$PROD_FAMILY" = xiaomi-band-11 ]; then
+if [ "$PROD_FAMILY" = xiaomi-band-10-pro ] || [ "$PROD_FAMILY" = xiaomi-band-11 ] || [ "$PROD_FAMILY" = redmi-watch ]; then
     OBJCOPY=${OBJCOPY:-${RUST_OBJCOPY:-}}
     if [ -z "$OBJCOPY" ]; then
         if command -v llvm-objcopy >/dev/null 2>&1; then
@@ -207,12 +239,19 @@ MANAGER_ICON_SOURCE="$ROOT/watchfaces/canopus-installer/manager_icon.bin"
     exit 1
 }
 mkdir -p "$PROD_FAMILY_STAGE"
-cp "$MANAGER_ICON_SOURCE" "$PROD_FAMILY_STAGE/manager_icon.bin"
+if [ "$TARGET_ID" = xiaomi-band-9-pro-3.1.190 ]; then
+    # The v8 firmware generation reads an lv_img_header_t, not the v9 header.
+    python3 "$ROOT/scripts/convert_manager_icon.py" "$MANAGER_ICON_SOURCE" "$PROD_FAMILY_STAGE/manager_icon.bin"
+elif [ "$TARGET_ID" = xiaomi-band-9-3.1.32 ]; then
+    python3 "$ROOT/scripts/convert_manager_icon.py" --rgb565 "$MANAGER_ICON_SOURCE" "$PROD_FAMILY_STAGE/manager_icon.bin"
+else
+    cp "$MANAGER_ICON_SOURCE" "$PROD_FAMILY_STAGE/manager_icon.bin"
+fi
 cp "$OUT/canopus_supervisor.elf" "$TARGET_STAGE"
 if [ "$PROD_FAMILY" = xiaomi-band-11 ]; then
     python3 "$ROOT/scripts/build_band11_installer.py" --target "$TARGET_ID" --supervisor "$OUT/canopus_supervisor.elf" \
         --output-dir "${CANOPUS_BAND11_OUTPUT_DIR:-$PROD_FAMILY_STAGE}"
-elif [ "$PROD_FAMILY" = xiaomi-band-9 ]; then
+elif [ "$IS_STAGED_LOADER" = 1 ]; then
     CANOPUS_INSTALLER_STAGE_ROOT="$PROD_FAMILY_STAGE" \
         sh "$ROOT/scripts/build_band9_bootstrap.sh" "$TARGET_ID" "$OUT"
     echo "staged canopus-installer-prod/$PROD_FAMILY/ (main.lua + stage1/stage2/profile/supervisor)"

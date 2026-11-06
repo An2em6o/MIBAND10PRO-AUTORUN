@@ -19,7 +19,8 @@ pub struct TargetPrivateSymbolRecord {
 }
 
 pub const TARGET_ID: &str = "xiaomi-band-10-pro-3.101.036";
-pub const FIRMWARE_SHA256: &str = "662d67f5e247e31e194d3161024890ba93b9d29d70b290fadb9aac8ce8ec3c81";
+pub const FIRMWARE_SHA256: &str =
+    "662d67f5e247e31e194d3161024890ba93b9d29d70b290fadb9aac8ce8ec3c81";
 
 pub const RECORDS: &[TargetPrivateSymbolRecord] = &[
     TargetPrivateSymbolRecord {
@@ -788,6 +789,33 @@ pub const RECORDS: &[TargetPrivateSymbolRecord] = &[
         prototype: "void(void *wakelock)",
     },
     TargetPrivateSymbolRecord {
+        name: "ble_advertising_start",
+        kind: "function",
+        entry: 0xc39aa88usize,
+        callable: 0xc39aa89usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "void *ble_advertising_start(void *adapter, const void *params28, const void *data, uint32_t length, const void *scan_response, uint16_t response_length, const void *callbacks)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "ble_scan_stop",
+        kind: "function",
+        entry: 0xc39ad08usize,
+        callable: 0xc39ad09usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int ble_scan_stop(void *adapter, void *scan)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "bt_adapter_enable",
+        kind: "function",
+        entry: 0xc398da0usize,
+        callable: 0xc398da1usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int bt_adapter_enable(void *adapter)",
+    },
+    TargetPrivateSymbolRecord {
         name: "bt_adapter_set_scan_mode",
         kind: "function",
         entry: 0xc39f078usize,
@@ -914,6 +942,15 @@ pub const RECORDS: &[TargetPrivateSymbolRecord] = &[
         prototype: "int(const uint8_t *, uint32_t)",
     },
     TargetPrivateSymbolRecord {
+        name: "bt_sal_le_stop_advertising",
+        kind: "function",
+        entry: 0xc39ab58usize,
+        callable: 0xc39ab59usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int bt_sal_le_stop_advertising(int adapter, int adv_handle)",
+    },
+    TargetPrivateSymbolRecord {
         name: "bt_timer_add",
         kind: "function",
         entry: 0xc7d2ca8usize,
@@ -930,6 +967,123 @@ pub const RECORDS: &[TargetPrivateSymbolRecord] = &[
         status: "STATIC_RECOVERED",
         policy: "restricted",
         prototype: "int(uint32_t *)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "feature_register_feature",
+        kind: "function",
+        entry: 0xc84a0a0usize,
+        callable: 0xc84a0a1usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int feature_register_feature(void *registry, const void *description)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "ferry_application_init",
+        kind: "function",
+        entry: 0xc8db1f8usize,
+        callable: 0xc8db1f9usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int ferry_application_init(void *application, void *options, void *loop)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "ferry_application_vtable",
+        kind: "global",
+        entry: 0x2cd7c5c0usize,
+        callable: 0x2cd7c5c0usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "const void *ferry_application_vtable[50]",
+    },
+    TargetPrivateSymbolRecord {
+        name: "ferry_framework_factory",
+        kind: "function",
+        entry: 0xc8e54acusize,
+        callable: 0xc8e54adusize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "void *ferry_framework_factory(void *framework, const char *uri)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "ferry_framework_instance",
+        kind: "global",
+        entry: 0x20138d30usize,
+        callable: 0x20138d30usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "void *ferry_framework_instance",
+    },
+    TargetPrivateSymbolRecord {
+        name: "ferry_framework_vtable",
+        kind: "global",
+        entry: 0x2cd7d618usize,
+        callable: 0x2cd7d618usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "const void *ferry_framework_vtable[13]",
+    },
+    TargetPrivateSymbolRecord {
+        name: "file_close",
+        kind: "function",
+        entry: 0xc1bf790usize,
+        callable: 0xc1bf791usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int file_close(FAR struct file *file)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "file_dup3",
+        kind: "function",
+        entry: 0xc1bf89cusize,
+        callable: 0xc1bf89dusize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int file_dup3(struct file *source, struct file *target, int flags)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "file_write",
+        kind: "function",
+        entry: 0xc1c315cusize,
+        callable: 0xc1c315dusize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "ssize_t file_write(struct file *file, const void *bytes, size_t length)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "files_getfilep",
+        kind: "function",
+        entry: 0xc1a9eccusize,
+        callable: 0xc1a9ecdusize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "struct file *files_getfilep(struct filelist *list, int fd)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "fs_getfilep",
+        kind: "function",
+        entry: 0xc1aa4f0usize,
+        callable: 0xc1aa4f1usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int fs_getfilep(int fd, struct file **filep)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "fs_putfilep",
+        kind: "function",
+        entry: 0xc1aa58cusize,
+        callable: 0xc1aa58dusize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int fs_putfilep(struct file *file)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "gap_client_instance",
+        kind: "global",
+        entry: 0x20122fb0usize,
+        callable: 0x20122fb0usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "void *",
     },
     TargetPrivateSymbolRecord {
         name: "gap_host_receive_slot",
@@ -950,6 +1104,15 @@ pub const RECORDS: &[TargetPrivateSymbolRecord] = &[
         prototype: "int(void *, uint8_t *, int)",
     },
     TargetPrivateSymbolRecord {
+        name: "gap_scan_start_impl",
+        kind: "function",
+        entry: 0xc39ac70usize,
+        callable: 0xc39ac71usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "void *gap_scan_start_impl(int adapter, const void *params, const int *block, const void *callbacks)",
+    },
+    TargetPrivateSymbolRecord {
         name: "l2_owner_timer_init",
         kind: "function",
         entry: 0xc2cd84cusize,
@@ -968,6 +1131,114 @@ pub const RECORDS: &[TargetPrivateSymbolRecord] = &[
         prototype: "int(void *timer, void (*callback)(void *), uint64_t timeout, uint64_t repeat)",
     },
     TargetPrivateSymbolRecord {
+        name: "l2cap_accept_handler",
+        kind: "function",
+        entry: 0xc7ea1d4usize,
+        callable: 0xc7ea1d5usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int l2cap_accept_handler(void *owner, uint32_t event, void *request)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "l2cap_connect_handler",
+        kind: "function",
+        entry: 0xc7e94fcusize,
+        callable: 0xc7e94fdusize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int l2cap_connect_handler(void *owner, uint32_t event, void *request)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "l2cap_credit_queue_flush",
+        kind: "function",
+        entry: 0xc7e96b4usize,
+        callable: 0xc7e96b5usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int l2cap_credit_queue_flush(void *stock, void *channel)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "l2cap_disconnect_channel",
+        kind: "function",
+        entry: 0xc7e84ccusize,
+        callable: 0xc7e84cdusize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int l2cap_disconnect_channel(void *channel)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "l2cap_find_channel",
+        kind: "function",
+        entry: 0xc7e7edcusize,
+        callable: 0xc7e7eddusize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "void *l2cap_find_channel(void *key, uint16_t cid)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "l2cap_find_le_psm",
+        kind: "function",
+        entry: 0xc7e707cusize,
+        callable: 0xc7e707dusize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "void *l2cap_find_le_psm(uint16_t psm, int kind)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "l2cap_le_connection_response",
+        kind: "function",
+        entry: 0xc7e9ff8usize,
+        callable: 0xc7e9ff9usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int l2cap_le_connection_response(void *channel, void *peer, int id, int result, int credits, int mtu, int mps)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "l2cap_queue_push",
+        kind: "function",
+        entry: 0xc7d266cusize,
+        callable: 0xc7d266dusize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int l2cap_queue_push(void *queue, void *node)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "l2cap_register_psm_handler",
+        kind: "function",
+        entry: 0xc7e805cusize,
+        callable: 0xc7e805dusize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int l2cap_register_psm_handler(void *owner, uint32_t event, void *entry)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "l2cap_send_handler",
+        kind: "function",
+        entry: 0xc7e9748usize,
+        callable: 0xc7e9749usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int l2cap_send_handler(void *owner, uint32_t event, void *request)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "l2cap_teardown_channel",
+        kind: "function",
+        entry: 0xc7e8b5cusize,
+        callable: 0xc7e8b5dusize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int l2cap_teardown_channel(void *channel,uint16_t reason)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "l2cap_unregister_psm_handler",
+        kind: "function",
+        entry: 0xc7eab28usize,
+        callable: 0xc7eab29usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int l2cap_unregister_psm_handler(void *owner, uint32_t event, void *entry)",
+    },
+    TargetPrivateSymbolRecord {
         name: "lv_obj_set_local_style_prop_xip_thunk",
         kind: "function",
         entry: 0xcaa7238usize,
@@ -977,13 +1248,49 @@ pub const RECORDS: &[TargetPrivateSymbolRecord] = &[
         prototype: "",
     },
     TargetPrivateSymbolRecord {
+        name: "miwear_bluetooth_owner_loop",
+        kind: "global",
+        entry: 0x2012225cusize,
+        callable: 0x2012225cusize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "void *",
+    },
+    TargetPrivateSymbolRecord {
+        name: "miwear_sar_connections",
+        kind: "global",
+        entry: 0x200e10b8usize,
+        callable: 0x200e10b8usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "void *",
+    },
+    TargetPrivateSymbolRecord {
+        name: "miwear_session_crypto_ctr",
+        kind: "function",
+        entry: 0xc7bb994usize,
+        callable: 0xc7bb995usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int(void *, int, uint16_t, const void *, void *)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "miwear_session_lookup",
+        kind: "function",
+        entry: 0xc7bf138usize,
+        callable: 0xc7bf139usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "void *(uint16_t)",
+    },
+    TargetPrivateSymbolRecord {
         name: "miwear_transport_l2_rx",
         kind: "function",
         entry: 0xc7be110usize,
         callable: 0xc7be111usize,
         status: "STATIC_RECOVERED",
         policy: "restricted",
-        prototype: "void(void *, uint8_t, uint8_t, const uint8_t *, uint16_t)",
+        prototype: "void(uint16_t, uint8_t, uint8_t, void *, uint16_t)",
     },
     TargetPrivateSymbolRecord {
         name: "miwear_transport_send",
@@ -993,6 +1300,141 @@ pub const RECORDS: &[TargetPrivateSymbolRecord] = &[
         status: "STATIC_RECOVERED",
         policy: "restricted",
         prototype: "int(void *, const void *)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "nxsched_foreach",
+        kind: "function",
+        entry: 0xc1f03b4usize,
+        callable: 0xc1f03b5usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "void nxsched_foreach(void (*worker)(void *tcb, void *arg), void *arg)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "pipe_file_operations",
+        kind: "global",
+        entry: 0x2cc9910cusize,
+        callable: 0x2cc9910cusize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "struct file_operations",
+    },
+    TargetPrivateSymbolRecord {
+        name: "qjs_call",
+        kind: "function",
+        entry: 0xc2a9bc0usize,
+        callable: 0xc2a9bc1usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "JSValue qjs_call(JSContext *ctx, JSValue func, JSValue this_obj, int argc, const JSValue *argv)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "qjs_define_property_value_str",
+        kind: "function",
+        entry: 0xc280e14usize,
+        callable: 0xc280e15usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int qjs_define_property_value_str(void *ctx, uint64_t object, const char *name, uint64_t value, int flags)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "qjs_free_cstring",
+        kind: "function",
+        entry: 0xc262748usize,
+        callable: 0xc262749usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "void qjs_free_cstring(JSContext *ctx, const char *str)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "qjs_free_value",
+        kind: "function",
+        entry: 0xc262194usize,
+        callable: 0xc262195usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "void qjs_free_value(JSContext *ctx, JSValue value)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "qjs_get_array_buffer",
+        kind: "function",
+        entry: 0xc2bd52cusize,
+        callable: 0xc2bd52dusize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "const uint8_t *qjs_get_array_buffer(void *ctx,size_t *length,uint64_t value)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "qjs_get_exception",
+        kind: "function",
+        entry: 0xc267960usize,
+        callable: 0xc267961usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "JSValue qjs_get_exception(JSContext *ctx)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "qjs_get_typed_array_buffer",
+        kind: "function",
+        entry: 0xc2bd58cusize,
+        callable: 0xc2bd58dusize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "uint64_t qjs_get_typed_array_buffer(void *ctx,uint64_t value,size_t *offset,size_t *length,size_t *element_size)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "qjs_is_function",
+        kind: "function",
+        entry: 0xc267988usize,
+        callable: 0xc267989usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int qjs_is_function(JSContext *ctx, JSValue value)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "qjs_new_array_buffer_copy",
+        kind: "function",
+        entry: 0xc2bd3c8usize,
+        callable: 0xc2bd3c9usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "uint64_t qjs_new_array_buffer_copy(void *ctx,const uint8_t *bytes,size_t length)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "qjs_new_c_function2",
+        kind: "function",
+        entry: 0xc2922c4usize,
+        callable: 0xc2922c5usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "JSValue qjs_new_c_function2(JSContext *ctx, void *fn, const char *name, int len, int nargs, int cproto)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "qjs_new_object",
+        kind: "function",
+        entry: 0xc28e0fcusize,
+        callable: 0xc28e0fdusize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "JSValue qjs_new_object(JSContext *ctx)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "qjs_new_string_len",
+        kind: "function",
+        entry: 0xc27ea50usize,
+        callable: 0xc27ea51usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "uint64_t qjs_new_string_len(void *ctx,const uint8_t *bytes,size_t length)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "qjs_to_cstring_len2",
+        kind: "function",
+        entry: 0xc27e50cusize,
+        callable: 0xc27e50dusize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "const char *qjs_to_cstring_len2(void *ctx, size_t *length, uint64_t value, int cesu8)",
     },
     TargetPrivateSymbolRecord {
         name: "sdp_builder_create",
@@ -1056,6 +1498,60 @@ pub const RECORDS: &[TargetPrivateSymbolRecord] = &[
         status: "STATIC_RECOVERED",
         policy: "restricted",
         prototype: "void *",
+    },
+    TargetPrivateSymbolRecord {
+        name: "uv__tls_key",
+        kind: "global",
+        entry: 0x201003acusize,
+        callable: 0x201003acusize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "pthread_key_t",
+    },
+    TargetPrivateSymbolRecord {
+        name: "uv_async_init",
+        kind: "function",
+        entry: 0xc2cb3a0usize,
+        callable: 0xc2cb3a1usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int uv_async_init(uv_loop_t *loop, uv_async_t *handle, uv_async_cb cb)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "uv_close",
+        kind: "function",
+        entry: 0xc2c5774usize,
+        callable: 0xc2c5775usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "void uv_close(void *handle, void (*close_callback)(void *handle))",
+    },
+    TargetPrivateSymbolRecord {
+        name: "uv_mutex_init",
+        kind: "function",
+        entry: 0xc2c6b54usize,
+        callable: 0xc2c6b55usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "int uv_mutex_init(void *mutex)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "uv_mutex_lock",
+        kind: "function",
+        entry: 0xc2c6c30usize,
+        callable: 0xc2c6c31usize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "void uv_mutex_lock(void *mutex)",
+    },
+    TargetPrivateSymbolRecord {
+        name: "uv_mutex_unlock",
+        kind: "function",
+        entry: 0xc2c6c4cusize,
+        callable: 0xc2c6c4dusize,
+        status: "STATIC_RECOVERED",
+        policy: "restricted",
+        prototype: "void uv_mutex_unlock(void *mutex)",
     },
     TargetPrivateSymbolRecord {
         name: "app_lookup",
@@ -1691,6 +2187,12 @@ pub const WAKELOCK_CREATE_ENTRY: usize = 0xca55f1cusize;
 pub const WAKELOCK_CREATE_CALLABLE: usize = 0xca55f1dusize;
 pub const WAKELOCK_RELEASE_ENTRY: usize = 0xca561e0usize;
 pub const WAKELOCK_RELEASE_CALLABLE: usize = 0xca561e1usize;
+pub const BLE_ADVERTISING_START_ENTRY: usize = 0xc39aa88usize;
+pub const BLE_ADVERTISING_START_CALLABLE: usize = 0xc39aa89usize;
+pub const BLE_SCAN_STOP_ENTRY: usize = 0xc39ad08usize;
+pub const BLE_SCAN_STOP_CALLABLE: usize = 0xc39ad09usize;
+pub const BT_ADAPTER_ENABLE_ENTRY: usize = 0xc398da0usize;
+pub const BT_ADAPTER_ENABLE_CALLABLE: usize = 0xc398da1usize;
 pub const BT_ADAPTER_SET_SCAN_MODE_ENTRY: usize = 0xc39f078usize;
 pub const BT_ADAPTER_SET_SCAN_MODE_CALLABLE: usize = 0xc39f079usize;
 pub const BT_ALLOC_ENTRY: usize = 0xc8284fcusize;
@@ -1718,23 +2220,108 @@ pub const BT_QUEUE_FREE_ENTRY: usize = 0xc828508usize;
 pub const BT_QUEUE_FREE_CALLABLE: usize = 0xc828509usize;
 pub const BT_REMOVE_BOND_PRIVATE_ENTRY: usize = 0xc3a034cusize;
 pub const BT_REMOVE_BOND_PRIVATE_CALLABLE: usize = 0xc3a034dusize;
+pub const BT_SAL_LE_STOP_ADVERTISING_ENTRY: usize = 0xc39ab58usize;
+pub const BT_SAL_LE_STOP_ADVERTISING_CALLABLE: usize = 0xc39ab59usize;
 pub const BT_TIMER_ADD_ENTRY: usize = 0xc7d2ca8usize;
 pub const BT_TIMER_ADD_CALLABLE: usize = 0xc7d2ca9usize;
 pub const BT_TIMER_CANCEL_ENTRY: usize = 0xc7d2d74usize;
 pub const BT_TIMER_CANCEL_CALLABLE: usize = 0xc7d2d75usize;
+pub const FEATURE_REGISTER_FEATURE_ENTRY: usize = 0xc84a0a0usize;
+pub const FEATURE_REGISTER_FEATURE_CALLABLE: usize = 0xc84a0a1usize;
+pub const FERRY_APPLICATION_INIT_ENTRY: usize = 0xc8db1f8usize;
+pub const FERRY_APPLICATION_INIT_CALLABLE: usize = 0xc8db1f9usize;
+pub const FERRY_APPLICATION_VTABLE_ENTRY: usize = 0x2cd7c5c0usize;
+pub const FERRY_FRAMEWORK_FACTORY_ENTRY: usize = 0xc8e54acusize;
+pub const FERRY_FRAMEWORK_FACTORY_CALLABLE: usize = 0xc8e54adusize;
+pub const FERRY_FRAMEWORK_INSTANCE_ENTRY: usize = 0x20138d30usize;
+pub const FERRY_FRAMEWORK_VTABLE_ENTRY: usize = 0x2cd7d618usize;
+pub const FILE_CLOSE_ENTRY: usize = 0xc1bf790usize;
+pub const FILE_CLOSE_CALLABLE: usize = 0xc1bf791usize;
+pub const FILE_DUP3_ENTRY: usize = 0xc1bf89cusize;
+pub const FILE_DUP3_CALLABLE: usize = 0xc1bf89dusize;
+pub const FILE_WRITE_ENTRY: usize = 0xc1c315cusize;
+pub const FILE_WRITE_CALLABLE: usize = 0xc1c315dusize;
+pub const FILES_GETFILEP_ENTRY: usize = 0xc1a9eccusize;
+pub const FILES_GETFILEP_CALLABLE: usize = 0xc1a9ecdusize;
+pub const FS_GETFILEP_ENTRY: usize = 0xc1aa4f0usize;
+pub const FS_GETFILEP_CALLABLE: usize = 0xc1aa4f1usize;
+pub const FS_PUTFILEP_ENTRY: usize = 0xc1aa58cusize;
+pub const FS_PUTFILEP_CALLABLE: usize = 0xc1aa58dusize;
+pub const GAP_CLIENT_INSTANCE_ENTRY: usize = 0x20122fb0usize;
 pub const GAP_HOST_RECEIVE_SLOT_ENTRY: usize = 0x20137e94usize;
 pub const GAP_HOST_STOCK_RECEIVE_ENTRY: usize = 0xc7d3eb4usize;
 pub const GAP_HOST_STOCK_RECEIVE_CALLABLE: usize = 0xc7d3eb5usize;
+pub const GAP_SCAN_START_IMPL_ENTRY: usize = 0xc39ac70usize;
+pub const GAP_SCAN_START_IMPL_CALLABLE: usize = 0xc39ac71usize;
 pub const L2_OWNER_TIMER_INIT_ENTRY: usize = 0xc2cd84cusize;
 pub const L2_OWNER_TIMER_INIT_CALLABLE: usize = 0xc2cd84dusize;
 pub const L2_OWNER_TIMER_START_ENTRY: usize = 0xc2cda3cusize;
 pub const L2_OWNER_TIMER_START_CALLABLE: usize = 0xc2cda3dusize;
+pub const L2CAP_ACCEPT_HANDLER_ENTRY: usize = 0xc7ea1d4usize;
+pub const L2CAP_ACCEPT_HANDLER_CALLABLE: usize = 0xc7ea1d5usize;
+pub const L2CAP_CONNECT_HANDLER_ENTRY: usize = 0xc7e94fcusize;
+pub const L2CAP_CONNECT_HANDLER_CALLABLE: usize = 0xc7e94fdusize;
+pub const L2CAP_CREDIT_QUEUE_FLUSH_ENTRY: usize = 0xc7e96b4usize;
+pub const L2CAP_CREDIT_QUEUE_FLUSH_CALLABLE: usize = 0xc7e96b5usize;
+pub const L2CAP_DISCONNECT_CHANNEL_ENTRY: usize = 0xc7e84ccusize;
+pub const L2CAP_DISCONNECT_CHANNEL_CALLABLE: usize = 0xc7e84cdusize;
+pub const L2CAP_FIND_CHANNEL_ENTRY: usize = 0xc7e7edcusize;
+pub const L2CAP_FIND_CHANNEL_CALLABLE: usize = 0xc7e7eddusize;
+pub const L2CAP_FIND_LE_PSM_ENTRY: usize = 0xc7e707cusize;
+pub const L2CAP_FIND_LE_PSM_CALLABLE: usize = 0xc7e707dusize;
+pub const L2CAP_LE_CONNECTION_RESPONSE_ENTRY: usize = 0xc7e9ff8usize;
+pub const L2CAP_LE_CONNECTION_RESPONSE_CALLABLE: usize = 0xc7e9ff9usize;
+pub const L2CAP_QUEUE_PUSH_ENTRY: usize = 0xc7d266cusize;
+pub const L2CAP_QUEUE_PUSH_CALLABLE: usize = 0xc7d266dusize;
+pub const L2CAP_REGISTER_PSM_HANDLER_ENTRY: usize = 0xc7e805cusize;
+pub const L2CAP_REGISTER_PSM_HANDLER_CALLABLE: usize = 0xc7e805dusize;
+pub const L2CAP_SEND_HANDLER_ENTRY: usize = 0xc7e9748usize;
+pub const L2CAP_SEND_HANDLER_CALLABLE: usize = 0xc7e9749usize;
+pub const L2CAP_TEARDOWN_CHANNEL_ENTRY: usize = 0xc7e8b5cusize;
+pub const L2CAP_TEARDOWN_CHANNEL_CALLABLE: usize = 0xc7e8b5dusize;
+pub const L2CAP_UNREGISTER_PSM_HANDLER_ENTRY: usize = 0xc7eab28usize;
+pub const L2CAP_UNREGISTER_PSM_HANDLER_CALLABLE: usize = 0xc7eab29usize;
 pub const LV_OBJ_SET_LOCAL_STYLE_PROP_XIP_THUNK_ENTRY: usize = 0xcaa7238usize;
 pub const LV_OBJ_SET_LOCAL_STYLE_PROP_XIP_THUNK_CALLABLE: usize = 0xcaa7239usize;
+pub const MIWEAR_BLUETOOTH_OWNER_LOOP_ENTRY: usize = 0x2012225cusize;
+pub const MIWEAR_SAR_CONNECTIONS_ENTRY: usize = 0x200e10b8usize;
+pub const MIWEAR_SESSION_CRYPTO_CTR_ENTRY: usize = 0xc7bb994usize;
+pub const MIWEAR_SESSION_CRYPTO_CTR_CALLABLE: usize = 0xc7bb995usize;
+pub const MIWEAR_SESSION_LOOKUP_ENTRY: usize = 0xc7bf138usize;
+pub const MIWEAR_SESSION_LOOKUP_CALLABLE: usize = 0xc7bf139usize;
 pub const MIWEAR_TRANSPORT_L2_RX_ENTRY: usize = 0xc7be110usize;
 pub const MIWEAR_TRANSPORT_L2_RX_CALLABLE: usize = 0xc7be111usize;
 pub const MIWEAR_TRANSPORT_SEND_ENTRY: usize = 0xc7be440usize;
 pub const MIWEAR_TRANSPORT_SEND_CALLABLE: usize = 0xc7be441usize;
+pub const NXSCHED_FOREACH_ENTRY: usize = 0xc1f03b4usize;
+pub const NXSCHED_FOREACH_CALLABLE: usize = 0xc1f03b5usize;
+pub const PIPE_FILE_OPERATIONS_ENTRY: usize = 0x2cc9910cusize;
+pub const QJS_CALL_ENTRY: usize = 0xc2a9bc0usize;
+pub const QJS_CALL_CALLABLE: usize = 0xc2a9bc1usize;
+pub const QJS_DEFINE_PROPERTY_VALUE_STR_ENTRY: usize = 0xc280e14usize;
+pub const QJS_DEFINE_PROPERTY_VALUE_STR_CALLABLE: usize = 0xc280e15usize;
+pub const QJS_FREE_CSTRING_ENTRY: usize = 0xc262748usize;
+pub const QJS_FREE_CSTRING_CALLABLE: usize = 0xc262749usize;
+pub const QJS_FREE_VALUE_ENTRY: usize = 0xc262194usize;
+pub const QJS_FREE_VALUE_CALLABLE: usize = 0xc262195usize;
+pub const QJS_GET_ARRAY_BUFFER_ENTRY: usize = 0xc2bd52cusize;
+pub const QJS_GET_ARRAY_BUFFER_CALLABLE: usize = 0xc2bd52dusize;
+pub const QJS_GET_EXCEPTION_ENTRY: usize = 0xc267960usize;
+pub const QJS_GET_EXCEPTION_CALLABLE: usize = 0xc267961usize;
+pub const QJS_GET_TYPED_ARRAY_BUFFER_ENTRY: usize = 0xc2bd58cusize;
+pub const QJS_GET_TYPED_ARRAY_BUFFER_CALLABLE: usize = 0xc2bd58dusize;
+pub const QJS_IS_FUNCTION_ENTRY: usize = 0xc267988usize;
+pub const QJS_IS_FUNCTION_CALLABLE: usize = 0xc267989usize;
+pub const QJS_NEW_ARRAY_BUFFER_COPY_ENTRY: usize = 0xc2bd3c8usize;
+pub const QJS_NEW_ARRAY_BUFFER_COPY_CALLABLE: usize = 0xc2bd3c9usize;
+pub const QJS_NEW_C_FUNCTION2_ENTRY: usize = 0xc2922c4usize;
+pub const QJS_NEW_C_FUNCTION2_CALLABLE: usize = 0xc2922c5usize;
+pub const QJS_NEW_OBJECT_ENTRY: usize = 0xc28e0fcusize;
+pub const QJS_NEW_OBJECT_CALLABLE: usize = 0xc28e0fdusize;
+pub const QJS_NEW_STRING_LEN_ENTRY: usize = 0xc27ea50usize;
+pub const QJS_NEW_STRING_LEN_CALLABLE: usize = 0xc27ea51usize;
+pub const QJS_TO_CSTRING_LEN2_ENTRY: usize = 0xc27e50cusize;
+pub const QJS_TO_CSTRING_LEN2_CALLABLE: usize = 0xc27e50dusize;
 pub const SDP_BUILDER_CREATE_ENTRY: usize = 0xc7f20bcusize;
 pub const SDP_BUILDER_CREATE_CALLABLE: usize = 0xc7f20bdusize;
 pub const SDP_COMMIT_ENTRY: usize = 0xc7f0080usize;
@@ -1746,6 +2333,17 @@ pub const SDP_UNREGISTER_CALLABLE: usize = 0xc7f216dusize;
 pub const STYLE_MISANS_MEDIUM_24_ENTRY: usize = 0x20109eb8usize;
 pub const STYLE_MISANS_MEDIUM_28_ENTRY: usize = 0x20109ed0usize;
 pub const STYLE_MISANS_REGULAR_24_ENTRY: usize = 0x20109e1cusize;
+pub const UV_TLS_KEY_ENTRY: usize = 0x201003acusize;
+pub const UV_ASYNC_INIT_ENTRY: usize = 0xc2cb3a0usize;
+pub const UV_ASYNC_INIT_CALLABLE: usize = 0xc2cb3a1usize;
+pub const UV_CLOSE_ENTRY: usize = 0xc2c5774usize;
+pub const UV_CLOSE_CALLABLE: usize = 0xc2c5775usize;
+pub const UV_MUTEX_INIT_ENTRY: usize = 0xc2c6b54usize;
+pub const UV_MUTEX_INIT_CALLABLE: usize = 0xc2c6b55usize;
+pub const UV_MUTEX_LOCK_ENTRY: usize = 0xc2c6c30usize;
+pub const UV_MUTEX_LOCK_CALLABLE: usize = 0xc2c6c31usize;
+pub const UV_MUTEX_UNLOCK_ENTRY: usize = 0xc2c6c4cusize;
+pub const UV_MUTEX_UNLOCK_CALLABLE: usize = 0xc2c6c4dusize;
 pub const APP_LOOKUP_ENTRY: usize = 0xca5107cusize;
 pub const APP_LOOKUP_CALLABLE: usize = 0xca5107dusize;
 pub const LVX_LABEL_CREATE_ENTRY: usize = 0xc589060usize;
@@ -1854,109 +2452,181 @@ pub const WATCHFACE_MANAGER_DELETE_WATCHFACE_CALLABLE: usize = 0xca7d389usize;
 
 pub unsafe fn raw_bt_adapter_get_instance() -> *mut core::ffi::c_void {
     type F = unsafe extern "C" fn() -> *mut core::ffi::c_void;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_ADAPTER_GET_INSTANCE_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_ADAPTER_GET_INSTANCE_CALLABLE)
+    };
     unsafe { f() }
 }
 
 pub unsafe fn raw_bt_l2cap_connect(a0: *const core::ffi::c_void) -> u32 {
     type F = unsafe extern "C" fn(*const core::ffi::c_void) -> u32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_L2CAP_CONNECT_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_L2CAP_CONNECT_CALLABLE)
+    };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_core_bt_pair_request_callback(a0: *mut core::ffi::c_void, a1: *const u8) -> i32 {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void, *const u8) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_CORE_BT_PAIR_REQUEST_CALLBACK_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(
+            canopus_target_generated::CANOPUS_FW_CORE_BT_PAIR_REQUEST_CALLBACK_CALLABLE,
+        )
+    };
     unsafe { f(a0, a1) }
 }
 
 pub unsafe fn raw_app_launcher_data_init() -> i32 {
     type F = unsafe extern "C" fn() -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_APP_LAUNCHER_DATA_INIT_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_APP_LAUNCHER_DATA_INIT_CALLABLE)
+    };
     unsafe { f() }
 }
 
 pub unsafe fn raw_app_launcher_del(a0: u16) -> i32 {
     type F = unsafe extern "C" fn(u16) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_APP_LAUNCHER_DEL_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_APP_LAUNCHER_DEL_CALLABLE)
+    };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_lv_obj_scroll_by(a0: *mut core::ffi::c_void, a1: i32, a2: i32, a3: u32) -> () {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void, i32, i32, u32) -> ();
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_SCROLL_BY_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_SCROLL_BY_CALLABLE)
+    };
     unsafe { f(a0, a1, a2, a3) }
 }
 
 pub unsafe fn raw_lv_obj_scroll_to_x(a0: *mut core::ffi::c_void, a1: i32, a2: u32) -> () {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void, i32, u32) -> ();
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_SCROLL_TO_X_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_SCROLL_TO_X_CALLABLE)
+    };
     unsafe { f(a0, a1, a2) }
 }
 
 pub unsafe fn raw_lv_obj_set_scroll_dir(a0: *mut core::ffi::c_void, a1: u32) -> () {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void, u32) -> ();
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_SET_SCROLL_DIR_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_SET_SCROLL_DIR_CALLABLE)
+    };
     unsafe { f(a0, a1) }
 }
 
 pub unsafe fn raw_lv_obj_set_scroll_snap_x(a0: *mut core::ffi::c_void, a1: u32) -> () {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void, u32) -> ();
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_SET_SCROLL_SNAP_X_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_SET_SCROLL_SNAP_X_CALLABLE)
+    };
     unsafe { f(a0, a1) }
 }
 
 pub unsafe fn raw_lv_obj_set_scroll_snap_y(a0: *mut core::ffi::c_void, a1: u32) -> () {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void, u32) -> ();
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_SET_SCROLL_SNAP_Y_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_SET_SCROLL_SNAP_Y_CALLABLE)
+    };
     unsafe { f(a0, a1) }
 }
 
 pub unsafe fn raw_lv_obj_set_scrollbar_mode(a0: *mut core::ffi::c_void, a1: u32) -> () {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void, u32) -> ();
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_SET_SCROLLBAR_MODE_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(
+            canopus_target_generated::CANOPUS_FW_LV_OBJ_SET_SCROLLBAR_MODE_CALLABLE,
+        )
+    };
     unsafe { f(a0, a1) }
 }
 
 pub unsafe fn raw_interconnect_close(a0: *mut core::ffi::c_void) -> i32 {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_INTERCONNECT_CLOSE_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_INTERCONNECT_CLOSE_CALLABLE)
+    };
     unsafe { f(a0) }
 }
 
-pub unsafe fn raw_interconnect_connect(a0: *mut core::ffi::c_void, a1: *mut core::ffi::c_void, a2: *const u8, a3: canopus_target_generated::canopus_interconnect_recv_cb) -> i32 {
-    type F = unsafe extern "C" fn(*mut core::ffi::c_void, *mut core::ffi::c_void, *const u8, canopus_target_generated::canopus_interconnect_recv_cb) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_INTERCONNECT_CONNECT_CALLABLE) };
+pub unsafe fn raw_interconnect_connect(
+    a0: *mut core::ffi::c_void,
+    a1: *mut core::ffi::c_void,
+    a2: *const u8,
+    a3: canopus_target_generated::canopus_interconnect_recv_cb,
+) -> i32 {
+    type F = unsafe extern "C" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *const u8,
+        canopus_target_generated::canopus_interconnect_recv_cb,
+    ) -> i32;
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_INTERCONNECT_CONNECT_CALLABLE)
+    };
     unsafe { f(a0, a1, a2, a3) }
 }
 
-pub unsafe fn raw_interconnect_send(a0: *mut core::ffi::c_void, a1: *const u8, a2: *const canopus_target_generated::canopus_interconnect_message, a3: canopus_target_generated::canopus_interconnect_send_done, a4: *mut core::ffi::c_void) -> i32 {
-    type F = unsafe extern "C" fn(*mut core::ffi::c_void, *const u8, *const canopus_target_generated::canopus_interconnect_message, canopus_target_generated::canopus_interconnect_send_done, *mut core::ffi::c_void) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_INTERCONNECT_SEND_CALLABLE) };
+pub unsafe fn raw_interconnect_send(
+    a0: *mut core::ffi::c_void,
+    a1: *const u8,
+    a2: *const canopus_target_generated::canopus_interconnect_message,
+    a3: canopus_target_generated::canopus_interconnect_send_done,
+    a4: *mut core::ffi::c_void,
+) -> i32 {
+    type F = unsafe extern "C" fn(
+        *mut core::ffi::c_void,
+        *const u8,
+        *const canopus_target_generated::canopus_interconnect_message,
+        canopus_target_generated::canopus_interconnect_send_done,
+        *mut core::ffi::c_void,
+    ) -> i32;
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_INTERCONNECT_SEND_CALLABLE)
+    };
     unsafe { f(a0, a1, a2, a3, a4) }
 }
 
-pub unsafe fn raw_quickapp_register_app(a0: u16, a1: *const canopus_target_generated::canopus_interconnect_app_info) -> i32 {
-    type F = unsafe extern "C" fn(u16, *const canopus_target_generated::canopus_interconnect_app_info) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_QUICKAPP_REGISTER_APP_CALLABLE) };
+pub unsafe fn raw_quickapp_register_app(
+    a0: u16,
+    a1: *const canopus_target_generated::canopus_interconnect_app_info,
+) -> i32 {
+    type F = unsafe extern "C" fn(
+        u16,
+        *const canopus_target_generated::canopus_interconnect_app_info,
+    ) -> i32;
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_QUICKAPP_REGISTER_APP_CALLABLE)
+    };
     unsafe { f(a0, a1) }
 }
 
-pub unsafe fn raw_thirdparty_submit_message_content(a0: *const core::ffi::c_void, a1: u32, a2: u32) -> i32 {
+pub unsafe fn raw_thirdparty_submit_message_content(
+    a0: *const core::ffi::c_void,
+    a1: u32,
+    a2: u32,
+) -> i32 {
     type F = unsafe extern "C" fn(*const core::ffi::c_void, u32, u32) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_THIRDPARTY_SUBMIT_MESSAGE_CONTENT_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(
+            canopus_target_generated::CANOPUS_FW_THIRDPARTY_SUBMIT_MESSAGE_CONTENT_CALLABLE,
+        )
+    };
     unsafe { f(a0, a1, a2) }
 }
 
 pub unsafe fn raw_insmod(a0: *const u8, a1: *const u8) -> *mut core::ffi::c_void {
     type F = unsafe extern "C" fn(*const u8, *const u8) -> *mut core::ffi::c_void;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_INSMOD_CALLABLE) };
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_INSMOD_CALLABLE) };
     unsafe { f(a0, a1) }
 }
 
 pub unsafe fn raw_modhandle(a0: *const u8) -> *mut core::ffi::c_void {
     type F = unsafe extern "C" fn(*const u8) -> *mut core::ffi::c_void;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_MODHANDLE_CALLABLE) };
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_MODHANDLE_CALLABLE) };
     unsafe { f(a0) }
 }
 
@@ -1966,9 +2636,14 @@ pub unsafe fn raw_rmmod(a0: *mut core::ffi::c_void) -> i32 {
     unsafe { f(a0) }
 }
 
-pub unsafe fn raw_clock_gettime(a0: u32, a1: *mut canopus_target_generated::stock_timespec_t) -> i32 {
+pub unsafe fn raw_clock_gettime(
+    a0: u32,
+    a1: *mut canopus_target_generated::stock_timespec_t,
+) -> i32 {
     type F = unsafe extern "C" fn(u32, *mut canopus_target_generated::stock_timespec_t) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_CLOCK_GETTIME_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_CLOCK_GETTIME_CALLABLE)
+    };
     unsafe { f(a0, a1) }
 }
 
@@ -1980,43 +2655,67 @@ pub unsafe fn raw_close(a0: i32) -> i32 {
 
 pub unsafe fn raw_closedir(a0: *mut core::ffi::c_void) -> i32 {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_CLOSEDIR_CALLABLE) };
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_CLOSEDIR_CALLABLE) };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_errno_location() -> *mut i32 {
     type F = unsafe extern "C" fn() -> *mut i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_ERRNO_LOCATION_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_ERRNO_LOCATION_CALLABLE)
+    };
     unsafe { f() }
 }
 
-pub unsafe fn raw_gethostbyname_r(a0: *const u8, a1: *mut core::ffi::c_void, a2: *mut u8, a3: usize, a4: *mut i32, a5: i32) -> i32 {
-    type F = unsafe extern "C" fn(*const u8, *mut core::ffi::c_void, *mut u8, usize, *mut i32, i32) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_GETHOSTBYNAME_R_CALLABLE) };
+pub unsafe fn raw_gethostbyname_r(
+    a0: *const u8,
+    a1: *mut core::ffi::c_void,
+    a2: *mut u8,
+    a3: usize,
+    a4: *mut i32,
+    a5: i32,
+) -> i32 {
+    type F = unsafe extern "C" fn(
+        *const u8,
+        *mut core::ffi::c_void,
+        *mut u8,
+        usize,
+        *mut i32,
+        i32,
+    ) -> i32;
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_GETHOSTBYNAME_R_CALLABLE)
+    };
     unsafe { f(a0, a1, a2, a3, a4, a5) }
 }
 
 pub unsafe fn raw_heap_free(a0: *mut core::ffi::c_void) -> i32 {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_HEAP_FREE_CALLABLE) };
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_HEAP_FREE_CALLABLE) };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_heap_mallinfo(a0: *mut core::ffi::c_void) -> *mut core::ffi::c_void {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void) -> *mut core::ffi::c_void;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_HEAP_MALLINFO_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_HEAP_MALLINFO_CALLABLE)
+    };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_heap_malloc(a0: u32) -> *mut core::ffi::c_void {
     type F = unsafe extern "C" fn(u32) -> *mut core::ffi::c_void;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_HEAP_MALLOC_CALLABLE) };
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_HEAP_MALLOC_CALLABLE) };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_heap_zalloc(a0: u32) -> *mut core::ffi::c_void {
     type F = unsafe extern "C" fn(u32) -> *mut core::ffi::c_void;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_HEAP_ZALLOC_CALLABLE) };
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_HEAP_ZALLOC_CALLABLE) };
     unsafe { f(a0) }
 }
 
@@ -2034,13 +2733,15 @@ pub unsafe fn raw_lseek(a0: i32, a1: i64, a2: i32) -> i64 {
 
 pub unsafe fn raw_net_lock() -> i32 {
     type F = unsafe extern "C" fn() -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_NET_LOCK_CALLABLE) };
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_NET_LOCK_CALLABLE) };
     unsafe { f() }
 }
 
 pub unsafe fn raw_net_unlock(a0: i32) -> () {
     type F = unsafe extern "C" fn(i32) -> ();
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_NET_UNLOCK_CALLABLE) };
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_NET_UNLOCK_CALLABLE) };
     unsafe { f(a0) }
 }
 
@@ -2052,404 +2753,729 @@ pub unsafe fn raw_open(a0: *const u8, a1: i32) -> i32 {
 
 pub unsafe fn raw_opendir(a0: *const u8) -> *mut core::ffi::c_void {
     type F = unsafe extern "C" fn(*const u8) -> *mut core::ffi::c_void;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_OPENDIR_CALLABLE) };
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_OPENDIR_CALLABLE) };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_readdir(a0: *mut core::ffi::c_void) -> *mut core::ffi::c_void {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void) -> *mut core::ffi::c_void;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_READDIR_CALLABLE) };
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_READDIR_CALLABLE) };
     unsafe { f(a0) }
 }
 
-pub unsafe fn raw_recvfrom(a0: i32, a1: *mut core::ffi::c_void, a2: u32, a3: i32, a4: *mut core::ffi::c_void, a5: *mut u32) -> i32 {
-    type F = unsafe extern "C" fn(i32, *mut core::ffi::c_void, u32, i32, *mut core::ffi::c_void, *mut u32) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_RECVFROM_CALLABLE) };
+pub unsafe fn raw_recvfrom(
+    a0: i32,
+    a1: *mut core::ffi::c_void,
+    a2: u32,
+    a3: i32,
+    a4: *mut core::ffi::c_void,
+    a5: *mut u32,
+) -> i32 {
+    type F = unsafe extern "C" fn(
+        i32,
+        *mut core::ffi::c_void,
+        u32,
+        i32,
+        *mut core::ffi::c_void,
+        *mut u32,
+    ) -> i32;
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_RECVFROM_CALLABLE) };
     unsafe { f(a0, a1, a2, a3, a4, a5) }
 }
 
-pub unsafe fn raw_register_blockdriver(a0: *const u8, a1: *const core::ffi::c_void, a2: u32, a3: *mut core::ffi::c_void) -> i32 {
-    type F = unsafe extern "C" fn(*const u8, *const core::ffi::c_void, u32, *mut core::ffi::c_void) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_REGISTER_BLOCKDRIVER_CALLABLE) };
+pub unsafe fn raw_register_blockdriver(
+    a0: *const u8,
+    a1: *const core::ffi::c_void,
+    a2: u32,
+    a3: *mut core::ffi::c_void,
+) -> i32 {
+    type F = unsafe extern "C" fn(
+        *const u8,
+        *const core::ffi::c_void,
+        u32,
+        *mut core::ffi::c_void,
+    ) -> i32;
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_REGISTER_BLOCKDRIVER_CALLABLE)
+    };
     unsafe { f(a0, a1, a2, a3) }
 }
 
-pub unsafe fn raw_register_driver(a0: *const u8, a1: *const core::ffi::c_void, a2: u32, a3: *mut core::ffi::c_void) -> i32 {
-    type F = unsafe extern "C" fn(*const u8, *const core::ffi::c_void, u32, *mut core::ffi::c_void) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_REGISTER_DRIVER_CALLABLE) };
+pub unsafe fn raw_register_driver(
+    a0: *const u8,
+    a1: *const core::ffi::c_void,
+    a2: u32,
+    a3: *mut core::ffi::c_void,
+) -> i32 {
+    type F = unsafe extern "C" fn(
+        *const u8,
+        *const core::ffi::c_void,
+        u32,
+        *mut core::ffi::c_void,
+    ) -> i32;
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_REGISTER_DRIVER_CALLABLE)
+    };
     unsafe { f(a0, a1, a2, a3) }
 }
 
 pub unsafe fn raw_rename(a0: *const u8, a1: *const u8) -> i32 {
     type F = unsafe extern "C" fn(*const u8, *const u8) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_RENAME_CALLABLE) };
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_RENAME_CALLABLE) };
     unsafe { f(a0, a1) }
 }
 
 pub unsafe fn raw_sem_post(a0: *mut core::ffi::c_void) -> i32 {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_SEM_POST_CALLABLE) };
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_SEM_POST_CALLABLE) };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_sem_trywait(a0: *mut core::ffi::c_void) -> i32 {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_SEM_TRYWAIT_CALLABLE) };
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_SEM_TRYWAIT_CALLABLE) };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_sem_wait(a0: *mut core::ffi::c_void) -> i32 {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_SEM_WAIT_CALLABLE) };
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_SEM_WAIT_CALLABLE) };
     unsafe { f(a0) }
 }
 
-pub unsafe fn raw_sendto(a0: i32, a1: *const core::ffi::c_void, a2: u32, a3: i32, a4: *const core::ffi::c_void, a5: u32) -> i32 {
-    type F = unsafe extern "C" fn(i32, *const core::ffi::c_void, u32, i32, *const core::ffi::c_void, u32) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_SENDTO_CALLABLE) };
+pub unsafe fn raw_sendto(
+    a0: i32,
+    a1: *const core::ffi::c_void,
+    a2: u32,
+    a3: i32,
+    a4: *const core::ffi::c_void,
+    a5: u32,
+) -> i32 {
+    type F = unsafe extern "C" fn(
+        i32,
+        *const core::ffi::c_void,
+        u32,
+        i32,
+        *const core::ffi::c_void,
+        u32,
+    ) -> i32;
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_SENDTO_CALLABLE) };
     unsafe { f(a0, a1, a2, a3, a4, a5) }
 }
 
-pub unsafe fn raw_setsockopt(a0: i32, a1: i32, a2: i32, a3: *const core::ffi::c_void, a4: u32) -> i32 {
+pub unsafe fn raw_setsockopt(
+    a0: i32,
+    a1: i32,
+    a2: i32,
+    a3: *const core::ffi::c_void,
+    a4: u32,
+) -> i32 {
     type F = unsafe extern "C" fn(i32, i32, i32, *const core::ffi::c_void, u32) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_SETSOCKOPT_CALLABLE) };
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_SETSOCKOPT_CALLABLE) };
     unsafe { f(a0, a1, a2, a3, a4) }
 }
 
 pub unsafe fn raw_socket(a0: i32, a1: i32, a2: i32) -> i32 {
     type F = unsafe extern "C" fn(i32, i32, i32) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_SOCKET_CALLABLE) };
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_SOCKET_CALLABLE) };
     unsafe { f(a0, a1, a2) }
 }
 
 pub unsafe fn raw_unlink(a0: *const u8) -> i32 {
     type F = unsafe extern "C" fn(*const u8) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_UNLINK_CALLABLE) };
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_UNLINK_CALLABLE) };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_unregister_blockdriver(a0: *const u8) -> i32 {
     type F = unsafe extern "C" fn(*const u8) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_UNREGISTER_BLOCKDRIVER_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_UNREGISTER_BLOCKDRIVER_CALLABLE)
+    };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_unregister_driver(a0: *const u8) -> i32 {
     type F = unsafe extern "C" fn(*const u8) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_UNREGISTER_DRIVER_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_UNREGISTER_DRIVER_CALLABLE)
+    };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_power_battery_charging() -> i32 {
     type F = unsafe extern "C" fn() -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_POWER_BATTERY_CHARGING_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_POWER_BATTERY_CHARGING_CALLABLE)
+    };
     unsafe { f() }
 }
 
 pub unsafe fn raw_power_battery_level() -> i32 {
     type F = unsafe extern "C" fn() -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_POWER_BATTERY_LEVEL_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_POWER_BATTERY_LEVEL_CALLABLE)
+    };
     unsafe { f() }
 }
 
 pub unsafe fn raw_power_battery_ready() -> i32 {
     type F = unsafe extern "C" fn() -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_POWER_BATTERY_READY_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_POWER_BATTERY_READY_CALLABLE)
+    };
     unsafe { f() }
 }
 
 pub unsafe fn raw_bt_adapter_set_scan_mode(a0: i32, a1: i32) -> i32 {
     type F = unsafe extern "C" fn(i32, i32) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_ADAPTER_SET_SCAN_MODE_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_ADAPTER_SET_SCAN_MODE_CALLABLE)
+    };
     unsafe { f(a0, a1) }
 }
 
 pub unsafe fn raw_bt_alloc(a0: u32) -> *mut core::ffi::c_void {
     type F = unsafe extern "C" fn(u32) -> *mut core::ffi::c_void;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_ALLOC_CALLABLE) };
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_ALLOC_CALLABLE) };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_bt_buffer_new(a0: u16, a1: u16) -> *mut core::ffi::c_void {
     type F = unsafe extern "C" fn(u16, u16) -> *mut core::ffi::c_void;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_BUFFER_NEW_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_BUFFER_NEW_CALLABLE)
+    };
     unsafe { f(a0, a1) }
 }
 
 pub unsafe fn raw_bt_create_bond_private(a0: *const u8, a1: u32) -> i32 {
     type F = unsafe extern "C" fn(*const u8, u32) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_CREATE_BOND_PRIVATE_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_CREATE_BOND_PRIVATE_CALLABLE)
+    };
     unsafe { f(a0, a1) }
 }
 
 pub unsafe fn raw_bt_discovery_start(a0: *mut core::ffi::c_void, a1: i32) -> i32 {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void, i32) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_DISCOVERY_START_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_DISCOVERY_START_CALLABLE)
+    };
     unsafe { f(a0, a1) }
 }
 
 pub unsafe fn raw_bt_discovery_stop(a0: *mut core::ffi::c_void) -> i32 {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_DISCOVERY_STOP_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_DISCOVERY_STOP_CALLABLE)
+    };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_bt_free(a0: *mut core::ffi::c_void) -> i32 {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_FREE_CALLABLE) };
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_FREE_CALLABLE) };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_bt_get_bond_state(a0: *const u8) -> u32 {
     type F = unsafe extern "C" fn(*const u8) -> u32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_GET_BOND_STATE_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_GET_BOND_STATE_CALLABLE)
+    };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_bt_l2cap_disconnect(a0: *const core::ffi::c_void) -> i32 {
     type F = unsafe extern "C" fn(*const core::ffi::c_void) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_L2CAP_DISCONNECT_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_L2CAP_DISCONNECT_CALLABLE)
+    };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_bt_l2cap_submit_cid(a0: *mut core::ffi::c_void, a1: u16) -> i32 {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void, u16) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_L2CAP_SUBMIT_CID_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_L2CAP_SUBMIT_CID_CALLABLE)
+    };
     unsafe { f(a0, a1) }
 }
 
-pub unsafe fn raw_bt_queue_external(a0: *mut core::ffi::c_void, a1: *mut core::ffi::c_void, a2: *mut core::ffi::c_void, a3: *mut core::ffi::c_void, a4: u8) -> i32 {
-    type F = unsafe extern "C" fn(*mut core::ffi::c_void, *mut core::ffi::c_void, *mut core::ffi::c_void, *mut core::ffi::c_void, u8) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_QUEUE_EXTERNAL_CALLABLE) };
+pub unsafe fn raw_bt_queue_external(
+    a0: *mut core::ffi::c_void,
+    a1: *mut core::ffi::c_void,
+    a2: *mut core::ffi::c_void,
+    a3: *mut core::ffi::c_void,
+    a4: u8,
+) -> i32 {
+    type F = unsafe extern "C" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        u8,
+    ) -> i32;
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_QUEUE_EXTERNAL_CALLABLE)
+    };
     unsafe { f(a0, a1, a2, a3, a4) }
 }
 
 pub unsafe fn raw_bt_queue_free(a0: *mut core::ffi::c_void) -> i32 {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_QUEUE_FREE_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_QUEUE_FREE_CALLABLE)
+    };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_bt_remove_bond_private(a0: *const u8, a1: u32) -> i32 {
     type F = unsafe extern "C" fn(*const u8, u32) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_REMOVE_BOND_PRIVATE_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_REMOVE_BOND_PRIVATE_CALLABLE)
+    };
     unsafe { f(a0, a1) }
 }
 
-pub unsafe fn raw_bt_timer_add(a0: *mut core::ffi::c_void, a1: u32, a2: u8, a3: *mut core::ffi::c_void, a4: *mut core::ffi::c_void, a5: *const u8, a6: u32) -> u32 {
-    type F = unsafe extern "C" fn(*mut core::ffi::c_void, u32, u8, *mut core::ffi::c_void, *mut core::ffi::c_void, *const u8, u32) -> u32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_TIMER_ADD_CALLABLE) };
+pub unsafe fn raw_bt_timer_add(
+    a0: *mut core::ffi::c_void,
+    a1: u32,
+    a2: u8,
+    a3: *mut core::ffi::c_void,
+    a4: *mut core::ffi::c_void,
+    a5: *const u8,
+    a6: u32,
+) -> u32 {
+    type F = unsafe extern "C" fn(
+        *mut core::ffi::c_void,
+        u32,
+        u8,
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *const u8,
+        u32,
+    ) -> u32;
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_TIMER_ADD_CALLABLE) };
     unsafe { f(a0, a1, a2, a3, a4, a5, a6) }
 }
 
 pub unsafe fn raw_bt_timer_cancel(a0: *mut u32) -> i32 {
     type F = unsafe extern "C" fn(*mut u32) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_TIMER_CANCEL_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_BT_TIMER_CANCEL_CALLABLE)
+    };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_gap_host_stock_receive(a0: *mut core::ffi::c_void, a1: *mut u8, a2: i32) -> i32 {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void, *mut u8, i32) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_GAP_HOST_STOCK_RECEIVE_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_GAP_HOST_STOCK_RECEIVE_CALLABLE)
+    };
     unsafe { f(a0, a1, a2) }
 }
 
-pub unsafe fn raw_miwear_transport_l2_rx(a0: *mut core::ffi::c_void, a1: u8, a2: u8, a3: *const u8, a4: u16) -> () {
-    type F = unsafe extern "C" fn(*mut core::ffi::c_void, u8, u8, *const u8, u16) -> ();
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_MIWEAR_TRANSPORT_L2_RX_CALLABLE) };
+pub unsafe fn raw_miwear_session_crypto_ctr(
+    a0: *mut core::ffi::c_void,
+    a1: i32,
+    a2: u16,
+    a3: *const core::ffi::c_void,
+    a4: *mut core::ffi::c_void,
+) -> i32 {
+    type F = unsafe extern "C" fn(
+        *mut core::ffi::c_void,
+        i32,
+        u16,
+        *const core::ffi::c_void,
+        *mut core::ffi::c_void,
+    ) -> i32;
+    let f: F = unsafe {
+        core::mem::transmute(
+            canopus_target_generated::CANOPUS_FW_MIWEAR_SESSION_CRYPTO_CTR_CALLABLE,
+        )
+    };
     unsafe { f(a0, a1, a2, a3, a4) }
 }
 
-pub unsafe fn raw_miwear_transport_send(a0: *mut core::ffi::c_void, a1: *const core::ffi::c_void) -> i32 {
+pub unsafe fn raw_miwear_session_lookup(a0: u16) -> *mut core::ffi::c_void {
+    type F = unsafe extern "C" fn(u16) -> *mut core::ffi::c_void;
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_MIWEAR_SESSION_LOOKUP_CALLABLE)
+    };
+    unsafe { f(a0) }
+}
+
+pub unsafe fn raw_miwear_transport_l2_rx(
+    a0: u16,
+    a1: u8,
+    a2: u8,
+    a3: *mut core::ffi::c_void,
+    a4: u16,
+) -> () {
+    type F = unsafe extern "C" fn(u16, u8, u8, *mut core::ffi::c_void, u16) -> ();
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_MIWEAR_TRANSPORT_L2_RX_CALLABLE)
+    };
+    unsafe { f(a0, a1, a2, a3, a4) }
+}
+
+pub unsafe fn raw_miwear_transport_send(
+    a0: *mut core::ffi::c_void,
+    a1: *const core::ffi::c_void,
+) -> i32 {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void, *const core::ffi::c_void) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_MIWEAR_TRANSPORT_SEND_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_MIWEAR_TRANSPORT_SEND_CALLABLE)
+    };
     unsafe { f(a0, a1) }
 }
 
-pub unsafe fn raw_sdp_builder_create(a0: u32, a1: u16, a2: u16, a3: u8, a4: *const u8) -> *mut core::ffi::c_void {
+pub unsafe fn raw_sdp_builder_create(
+    a0: u32,
+    a1: u16,
+    a2: u16,
+    a3: u8,
+    a4: *const u8,
+) -> *mut core::ffi::c_void {
     type F = unsafe extern "C" fn(u32, u16, u16, u8, *const u8) -> *mut core::ffi::c_void;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_SDP_BUILDER_CREATE_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_SDP_BUILDER_CREATE_CALLABLE)
+    };
     unsafe { f(a0, a1, a2, a3, a4) }
 }
 
 pub unsafe fn raw_sdp_commit(a0: *mut core::ffi::c_void) -> u32 {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void) -> u32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_SDP_COMMIT_CALLABLE) };
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_SDP_COMMIT_CALLABLE) };
     unsafe { f(a0) }
 }
 
-pub unsafe fn raw_sdp_set_raw_attribute(a0: *mut core::ffi::c_void, a1: u16, a2: u16, a3: u16, a4: *const core::ffi::c_void) -> *mut u8 {
-    type F = unsafe extern "C" fn(*mut core::ffi::c_void, u16, u16, u16, *const core::ffi::c_void) -> *mut u8;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_SDP_SET_RAW_ATTRIBUTE_CALLABLE) };
+pub unsafe fn raw_sdp_set_raw_attribute(
+    a0: *mut core::ffi::c_void,
+    a1: u16,
+    a2: u16,
+    a3: u16,
+    a4: *const core::ffi::c_void,
+) -> *mut u8 {
+    type F = unsafe extern "C" fn(
+        *mut core::ffi::c_void,
+        u16,
+        u16,
+        u16,
+        *const core::ffi::c_void,
+    ) -> *mut u8;
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_SDP_SET_RAW_ATTRIBUTE_CALLABLE)
+    };
     unsafe { f(a0, a1, a2, a3, a4) }
 }
 
 pub unsafe fn raw_sdp_unregister(a0: u32) -> i32 {
     type F = unsafe extern "C" fn(u32) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_SDP_UNREGISTER_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_SDP_UNREGISTER_CALLABLE)
+    };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_screen_get_state() -> i32 {
     type F = unsafe extern "C" fn() -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_SCREEN_GET_STATE_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_SCREEN_GET_STATE_CALLABLE)
+    };
     unsafe { f() }
 }
 
 pub unsafe fn raw_service_manager_get_profile(a0: u32) -> *mut core::ffi::c_void {
     type F = unsafe extern "C" fn(u32) -> *mut core::ffi::c_void;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_SERVICE_MANAGER_GET_PROFILE_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(
+            canopus_target_generated::CANOPUS_FW_SERVICE_MANAGER_GET_PROFILE_CALLABLE,
+        )
+    };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_service_manager_register(a0: *mut core::ffi::c_void) -> i32 {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_SERVICE_MANAGER_REGISTER_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_SERVICE_MANAGER_REGISTER_CALLABLE)
+    };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_service_manager_shutdown(a0: i32) -> i32 {
     type F = unsafe extern "C" fn(i32) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_SERVICE_MANAGER_SHUTDOWN_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_SERVICE_MANAGER_SHUTDOWN_CALLABLE)
+    };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_service_manager_startup(a0: i32) -> i32 {
     type F = unsafe extern "C" fn(i32) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_SERVICE_MANAGER_STARTUP_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_SERVICE_MANAGER_STARTUP_CALLABLE)
+    };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_lv_bar_create(a0: *mut core::ffi::c_void) -> *mut core::ffi::c_void {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void) -> *mut core::ffi::c_void;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_BAR_CREATE_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_BAR_CREATE_CALLABLE)
+    };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_lv_bar_set_range(a0: *mut core::ffi::c_void, a1: i32, a2: i32) -> () {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void, i32, i32) -> ();
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_BAR_SET_RANGE_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_BAR_SET_RANGE_CALLABLE)
+    };
     unsafe { f(a0, a1, a2) }
 }
 
 pub unsafe fn raw_lv_bar_set_value(a0: *mut core::ffi::c_void, a1: i32, a2: u32) -> () {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void, i32, u32) -> ();
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_BAR_SET_VALUE_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_BAR_SET_VALUE_CALLABLE)
+    };
     unsafe { f(a0, a1, a2) }
 }
 
 pub unsafe fn raw_lv_event_get_user_data(a0: *mut core::ffi::c_void) -> *mut core::ffi::c_void {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void) -> *mut core::ffi::c_void;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_EVENT_GET_USER_DATA_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_EVENT_GET_USER_DATA_CALLABLE)
+    };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_lv_image_create(a0: *mut core::ffi::c_void) -> *mut core::ffi::c_void {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void) -> *mut core::ffi::c_void;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_IMAGE_CREATE_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_IMAGE_CREATE_CALLABLE)
+    };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_lv_image_set_src(a0: *mut core::ffi::c_void, a1: *const core::ffi::c_void) -> () {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void, *const core::ffi::c_void) -> ();
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_IMAGE_SET_SRC_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_IMAGE_SET_SRC_CALLABLE)
+    };
     unsafe { f(a0, a1) }
 }
 
-pub unsafe fn raw_lv_obj_add_event_cb(a0: *mut core::ffi::c_void, a1: canopus_target_generated::canopus_lvx_event_cb, a2: u32, a3: *mut core::ffi::c_void) -> () {
-    type F = unsafe extern "C" fn(*mut core::ffi::c_void, canopus_target_generated::canopus_lvx_event_cb, u32, *mut core::ffi::c_void) -> ();
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_ADD_EVENT_CB_CALLABLE) };
+pub unsafe fn raw_lv_obj_add_event_cb(
+    a0: *mut core::ffi::c_void,
+    a1: canopus_target_generated::canopus_lvx_event_cb,
+    a2: u32,
+    a3: *mut core::ffi::c_void,
+) -> () {
+    type F = unsafe extern "C" fn(
+        *mut core::ffi::c_void,
+        canopus_target_generated::canopus_lvx_event_cb,
+        u32,
+        *mut core::ffi::c_void,
+    ) -> ();
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_ADD_EVENT_CB_CALLABLE)
+    };
     unsafe { f(a0, a1, a2, a3) }
 }
 
-pub unsafe fn raw_lv_obj_align_to(a0: *mut core::ffi::c_void, a1: *mut core::ffi::c_void, a2: u32, a3: i32, a4: i32) -> () {
-    type F = unsafe extern "C" fn(*mut core::ffi::c_void, *mut core::ffi::c_void, u32, i32, i32) -> ();
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_ALIGN_TO_CALLABLE) };
+pub unsafe fn raw_lv_obj_align_to(
+    a0: *mut core::ffi::c_void,
+    a1: *mut core::ffi::c_void,
+    a2: u32,
+    a3: i32,
+    a4: i32,
+) -> () {
+    type F =
+        unsafe extern "C" fn(*mut core::ffi::c_void, *mut core::ffi::c_void, u32, i32, i32) -> ();
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_ALIGN_TO_CALLABLE)
+    };
     unsafe { f(a0, a1, a2, a3, a4) }
 }
 
 pub unsafe fn raw_lv_obj_clear_flag(a0: *mut core::ffi::c_void, a1: u32) -> () {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void, u32) -> ();
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_CLEAR_FLAG_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_CLEAR_FLAG_CALLABLE)
+    };
     unsafe { f(a0, a1) }
 }
 
 pub unsafe fn raw_lv_obj_move_to_index(a0: *mut core::ffi::c_void, a1: i32) -> () {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void, i32) -> ();
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_MOVE_TO_INDEX_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_MOVE_TO_INDEX_CALLABLE)
+    };
     unsafe { f(a0, a1) }
 }
 
 pub unsafe fn raw_lv_obj_remove_state(a0: *mut core::ffi::c_void, a1: u32) -> () {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void, u32) -> ();
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_REMOVE_STATE_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_REMOVE_STATE_CALLABLE)
+    };
     unsafe { f(a0, a1) }
 }
 
-pub unsafe fn raw_lv_obj_set_local_style_prop(a0: *mut core::ffi::c_void, a1: u32, a2: u32, a3: u32) -> () {
+pub unsafe fn raw_lv_obj_set_local_style_prop(
+    a0: *mut core::ffi::c_void,
+    a1: u32,
+    a2: u32,
+    a3: u32,
+) -> () {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void, u32, u32, u32) -> ();
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_SET_LOCAL_STYLE_PROP_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(
+            canopus_target_generated::CANOPUS_FW_LV_OBJ_SET_LOCAL_STYLE_PROP_CALLABLE,
+        )
+    };
     unsafe { f(a0, a1, a2, a3) }
 }
 
 pub unsafe fn raw_lv_obj_set_style_bg_opa(a0: *mut core::ffi::c_void, a1: u32, a2: u32) -> () {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void, u32, u32) -> ();
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_SET_STYLE_BG_OPA_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_OBJ_SET_STYLE_BG_OPA_CALLABLE)
+    };
     unsafe { f(a0, a1, a2) }
 }
 
-pub unsafe fn raw_lv_timer_create(a0: canopus_target_generated::canopus_lvx_event_cb, a1: u32, a2: *mut core::ffi::c_void) -> *mut core::ffi::c_void {
-    type F = unsafe extern "C" fn(canopus_target_generated::canopus_lvx_event_cb, u32, *mut core::ffi::c_void) -> *mut core::ffi::c_void;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_TIMER_CREATE_CALLABLE) };
+pub unsafe fn raw_lv_timer_create(
+    a0: canopus_target_generated::canopus_lvx_event_cb,
+    a1: u32,
+    a2: *mut core::ffi::c_void,
+) -> *mut core::ffi::c_void {
+    type F = unsafe extern "C" fn(
+        canopus_target_generated::canopus_lvx_event_cb,
+        u32,
+        *mut core::ffi::c_void,
+    ) -> *mut core::ffi::c_void;
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_TIMER_CREATE_CALLABLE)
+    };
     unsafe { f(a0, a1, a2) }
 }
 
 pub unsafe fn raw_lv_timer_del(a0: *mut core::ffi::c_void) -> () {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void) -> ();
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_TIMER_DEL_CALLABLE) };
+    let f: F =
+        unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LV_TIMER_DEL_CALLABLE) };
     unsafe { f(a0) }
 }
 
 pub unsafe fn raw_lvx_image_set_scale(a0: *mut core::ffi::c_void, a1: i32, a2: i32) -> () {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void, i32, i32) -> ();
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LVX_IMAGE_SET_SCALE_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LVX_IMAGE_SET_SCALE_CALLABLE)
+    };
     unsafe { f(a0, a1, a2) }
 }
 
-pub unsafe fn raw_lvx_list_item_update(a0: *mut core::ffi::c_void, a1: *const u8, a2: *const u8, a3: *const u8, a4: i32, a5: u8) -> i32 {
-    type F = unsafe extern "C" fn(*mut core::ffi::c_void, *const u8, *const u8, *const u8, i32, u8) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LVX_LIST_ITEM_UPDATE_CALLABLE) };
+pub unsafe fn raw_lvx_list_item_update(
+    a0: *mut core::ffi::c_void,
+    a1: *const u8,
+    a2: *const u8,
+    a3: *const u8,
+    a4: i32,
+    a5: u8,
+) -> i32 {
+    type F = unsafe extern "C" fn(
+        *mut core::ffi::c_void,
+        *const u8,
+        *const u8,
+        *const u8,
+        i32,
+        u8,
+    ) -> i32;
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LVX_LIST_ITEM_UPDATE_CALLABLE)
+    };
     unsafe { f(a0, a1, a2, a3, a4, a5) }
 }
 
 pub unsafe fn raw_lvx_object_add_flag(a0: *mut core::ffi::c_void, a1: u32) -> () {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void, u32) -> ();
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LVX_OBJECT_ADD_FLAG_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LVX_OBJECT_ADD_FLAG_CALLABLE)
+    };
     unsafe { f(a0, a1) }
 }
 
 pub unsafe fn raw_lvx_page_content_create(a0: *mut core::ffi::c_void) -> *mut core::ffi::c_void {
     type F = unsafe extern "C" fn(*mut core::ffi::c_void) -> *mut core::ffi::c_void;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LVX_PAGE_CONTENT_CREATE_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LVX_PAGE_CONTENT_CREATE_CALLABLE)
+    };
     unsafe { f(a0) }
 }
 
-pub unsafe fn raw_lvx_page_title_create(a0: *mut core::ffi::c_void, a1: *const u8, a2: u32, a3: canopus_target_generated::canopus_lvx_event_cb, a4: *mut core::ffi::c_void) -> *mut core::ffi::c_void {
-    type F = unsafe extern "C" fn(*mut core::ffi::c_void, *const u8, u32, canopus_target_generated::canopus_lvx_event_cb, *mut core::ffi::c_void) -> *mut core::ffi::c_void;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LVX_PAGE_TITLE_CREATE_CALLABLE) };
+pub unsafe fn raw_lvx_page_title_create(
+    a0: *mut core::ffi::c_void,
+    a1: *const u8,
+    a2: u32,
+    a3: canopus_target_generated::canopus_lvx_event_cb,
+    a4: *mut core::ffi::c_void,
+) -> *mut core::ffi::c_void {
+    type F = unsafe extern "C" fn(
+        *mut core::ffi::c_void,
+        *const u8,
+        u32,
+        canopus_target_generated::canopus_lvx_event_cb,
+        *mut core::ffi::c_void,
+    ) -> *mut core::ffi::c_void;
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LVX_PAGE_TITLE_CREATE_CALLABLE)
+    };
     unsafe { f(a0, a1, a2, a3, a4) }
 }
 
-pub unsafe fn raw_lvx_style_apply(a0: *mut core::ffi::c_void, a1: *const core::ffi::c_void, a2: u32, a3: u32) -> i32 {
-    type F = unsafe extern "C" fn(*mut core::ffi::c_void, *const core::ffi::c_void, u32, u32) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_LVX_STYLE_APPLY_CALLABLE) };
+pub unsafe fn raw_lvx_style_apply(
+    a0: *mut core::ffi::c_void,
+    a1: *const core::ffi::c_void,
+    a2: u32,
+    a3: u32,
+) -> i32 {
+    type F =
+        unsafe extern "C" fn(*mut core::ffi::c_void, *const core::ffi::c_void, u32, u32) -> i32;
+    let f: F = unsafe {
+        core::mem::transmute(canopus_target_generated::CANOPUS_FW_LVX_STYLE_APPLY_CALLABLE)
+    };
     unsafe { f(a0, a1, a2, a3) }
 }
 
 pub unsafe fn raw_watchface_manager_delete_watchface(a0: *const u8) -> i32 {
     type F = unsafe extern "C" fn(*const u8) -> i32;
-    let f: F = unsafe { core::mem::transmute(canopus_target_generated::CANOPUS_FW_WATCHFACE_MANAGER_DELETE_WATCHFACE_CALLABLE) };
+    let f: F = unsafe {
+        core::mem::transmute(
+            canopus_target_generated::CANOPUS_FW_WATCHFACE_MANAGER_DELETE_WATCHFACE_CALLABLE,
+        )
+    };
     unsafe { f(a0) }
 }
 
-// generated target-private raw wrapper count: 100
+// generated target-private raw wrapper count: 102

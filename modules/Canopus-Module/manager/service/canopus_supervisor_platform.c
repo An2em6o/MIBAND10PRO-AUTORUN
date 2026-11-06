@@ -45,6 +45,10 @@
  * resolves paths before checking the /dev, /proc and /sys deny prefixes).
  * Keep this outside /data, which is a mounted filesystem. */
 #define CANOPUS_SUP_INSTALLER_PATH "/canopus/install"
+/* Read-only wire image of the slot table. The REDMI Watch 6 VFS refuses to
+ * create files from the supervisor's call path, so the installer watchface
+ * reads this node and writes /data/canopus/registry.bin itself. */
+#define CANOPUS_SUP_REGISTRY_DEVICE_PATH "/canopus/registry"
 #define CANOPUS_SUP_INBOX_ROOT "/data/canopus/inbox/"
 /* Package kinds: generation A, generation B, and the staging area the
  * miwear client writes to. The client only ever writes the NEXT pair. */
@@ -53,14 +57,34 @@ static const char *const s_receipt_suffix[SUP_KIND_COUNT] = {
     ".cmi", ".cmi.b", ".cmi.next"};
 static const char *const s_module_suffix[SUP_KIND_COUNT] = {
     ".ko", ".ko.b", ".ko.next"};
-#define CANOPUS_SUP_PATH_MAX 224u
+/* Longest path is the inbox root, a module id and the staging suffix:
+ * 19 + (CANOPUS_SUP_MODULE_ID_MAX - 1) + 9 + 1 = 60 bytes. The constructor runs
+ * on the firmware's exec-task stack, where a 224-byte path buffer overflowed it
+ * on 3.1.28 (reset before /dev/canopus registered its first page). */
+#define CANOPUS_SUP_PATH_MAX 64u
 /* Read granularity for the hash/verify readbacks; larger blocks mean fewer
  * flash syscalls per byte. */
 #define CANOPUS_SUP_READ_CHUNK 1024u
+/* NuttX open() flag encoding. Both generations use the MIwear values derived
+ * from 3.1.28/3.1.190 (read 1, write 2, O_CREAT 4) - vfs_open 0x1c157d24 on the
+ * REDMI Watch 6 gates the mode argument on flag bit 2 exactly like the Band 9
+ * images. A read needs O_RDONLY 1 there: with 0 every read of a staged file
+ * fails with EACCES, which blocked the receipt read (diagnostic -1213). */
+#if defined(CANOPUS_MGR_REDMI_WATCH)
+#define CANOPUS_SUP_NUTTX_O_RDONLY 1
+#define CANOPUS_SUP_NUTTX_O_WRONLY 2u
+#define CANOPUS_SUP_NUTTX_O_RDWR 3u
+/* vfs_open 0x1c157d24 reads the mode argument only when flag bit 2 is set
+ * (`TST.W R2,#4` in the prologue), so O_CREAT is 4 here, not 0x40. */
+#define CANOPUS_SUP_NUTTX_O_CREAT 4u
+#define CANOPUS_SUP_NUTTX_O_TRUNC 0x200u
+#else
 #define CANOPUS_SUP_NUTTX_O_RDONLY 1
 #define CANOPUS_SUP_NUTTX_O_WRONLY 2u
 #define CANOPUS_SUP_NUTTX_O_CREAT 0x4u
 #define CANOPUS_SUP_NUTTX_O_RDWR (CANOPUS_SUP_NUTTX_O_RDONLY | CANOPUS_SUP_NUTTX_O_WRONLY)
+#define CANOPUS_SUP_NUTTX_O_TRUNC 0u
+#endif
 #define CANOPUS_SUP_DEVICE_MODE 438u /* 0666 */
 #define CANOPUS_SUP_FOPS_WORDS 12u   /* matches the stock file_operations table */
 /* Next-boot registry persistence (see canopus_supervisor.h for the format). */
@@ -149,6 +173,9 @@ static const struct canopus_hook_code_view s_hook_code_view = {
  * driver expects. */
 static file_operations s_fops;
 static file_operations s_installer_fops;
+#if defined(CANOPUS_MGR_REDMI_WATCH)
+static file_operations s_registry_fops;
+#endif
 
 CANOPUS_STATIC_ASSERT(sizeof(file_operations) == 0x30u,
                       "file_operations must match the 12-word stock table");
@@ -158,7 +185,7 @@ CANOPUS_STATIC_ASSERT(CANOPUS_SUP_FOPS_WORDS * 4u == sizeof(file_operations),
 static int sup_register_driver_exact(const char *path, const void *fops,
                                      void *private_data)
 {
-#ifdef CANOPUS_SUP_BAND9_BOOTSTRAP
+#if defined(CANOPUS_SUP_BAND9_BOOTSTRAP) && defined(CANOPUS_SUP_BAND9_INODE_REGISTER)
     typedef int (*lock_fn)(void);
     typedef int (*reserve_fn)(const char *, void **);
     typedef int (*unlock_fn)(void);
@@ -173,11 +200,15 @@ static int sup_register_driver_exact(const char *path, const void *fops,
 
     if (result < 0) return result;
     result = reserve_inode(path, (void **)&inode);
+    if (result != 0) {
+        (void)unlock_inode();
+        return result;
+    }
     if (result == 0) {
         type = *(uint16_t *)(void *)(inode + 14u);
         *(const void **)(void *)(inode + 16u) = fops;
         *(uint16_t *)(void *)(inode + 14u) =
-            (uint16_t)((type & UINT16_C(0xFFF0)) | UINT16_C(7));
+            (uint16_t)((type & UINT16_C(0xFFF0)) | UINT16_C(1));
         *(void **)(void *)(inode + 28u) = private_data;
     }
     unlock_result = unlock_inode();
@@ -238,6 +269,21 @@ static int32_t sup_installer_read(void *filep, void *buffer, uint32_t count)
     (void)canopus_sup_l2_start();
     return canopus_supervisor_installer_read(canopus_supervisor_get(), buffer, count);
 }
+
+#if defined(CANOPUS_MGR_REDMI_WATCH)
+static int32_t sup_registry_device_read(void *filep, void *buffer, uint32_t count)
+{
+    uint8_t record[CANOPUS_SUP_REGISTRY_SIZE];
+    (void)filep;
+    if (buffer == 0 || count < sizeof(record)) return -1;
+    if (canopus_supervisor_serialize_registry(canopus_supervisor_get(), record,
+                                              sizeof(record)) != 0) {
+        return -1;
+    }
+    canopus_memcpy(buffer, record, sizeof(record));
+    return (int32_t)sizeof(record);
+}
+#endif
 
 static int32_t sup_installer_write(void *filep, const void *buffer, uint32_t count)
 {
@@ -303,15 +349,26 @@ static int sup_register_device(void *cookie)
         return -(CANOPUS_SUP_REGISTER_VERIFY_ERRNO_BASE + error);
     }
     (void)close_file(fd);
+#if defined(CANOPUS_MGR_REDMI_WATCH)
+    s_registry_fops.open = (void *)(uintptr_t)&sup_control_open;
+    s_registry_fops.close = (void *)(uintptr_t)&sup_control_close;
+    s_registry_fops.read = (void *)(uintptr_t)&sup_registry_device_read;
+#endif
     rc = sup_register_driver_exact(CANOPUS_SUP_INSTALLER_PATH,
                                    (const void *)&s_installer_fops, (void *)0);
     if (rc != 0) return rc;
     fd = open_file(CANOPUS_SUP_INSTALLER_PATH, CANOPUS_SUP_NUTTX_O_RDONLY);
     if (fd < 0) return -(CANOPUS_SUP_REGISTER_VERIFY_ERRNO_BASE + 2);
     (void)close_file(fd);
-    /* Band 10 Pro autorun defers L2 bootstrap to control I/O. Keep the
-     * existing constructor bootstrap for other targets, including loaders
-     * whose only subsequent control path may be L2. */
+#if defined(CANOPUS_MGR_REDMI_WATCH)
+    rc = sup_register_driver_exact(CANOPUS_SUP_REGISTRY_DEVICE_PATH,
+                                   (const void *)&s_registry_fops, (void *)0);
+    if (rc != 0) return rc;
+#endif
+    /* Band 10 Pro autorun defers L2 bootstrap to control I/O. */
+    if (canopus_strcmp(CANOPUS_SUP_TARGET_ID, "xiaomi-band-10-pro-3.101.036") != 0 &&
+        canopus_strcmp(CANOPUS_SUP_TARGET_ID, "xiaomi-band-10-pro-3.101.043") != 0)
+        /* Band 10 Pro autorun defers L2 bootstrap to control I/O. */
     if (canopus_strcmp(CANOPUS_SUP_TARGET_ID, "xiaomi-band-10-pro-3.101.036") != 0 &&
         canopus_strcmp(CANOPUS_SUP_TARGET_ID, "xiaomi-band-10-pro-3.101.043") != 0)
         (void)canopus_sup_l2_start();
@@ -520,6 +577,8 @@ static int sup_write_all(const char *path, const void *data, uint32_t size)
     if (path == 0 || data == 0 || size == 0u) {
         return CANOPUS_SUP_ERR_REGISTRY_OPEN;
     }
+    /* No O_TRUNC: the callers unlink the name first, so the descriptor always
+     * starts on an empty file. */
     fd = open_file(path, CANOPUS_SUP_NUTTX_O_WRONLY | CANOPUS_SUP_NUTTX_O_CREAT,
                    CANOPUS_SUP_DEVICE_MODE);
     if (fd < 0) {
@@ -641,7 +700,9 @@ static int sup_verify_kind(
         *diagnostic = CANOPUS_SUP_ERR_STAGE_ARTIFACT;
         return -1;
     }
-    *diagnostic = CANOPUS_SUP_ERR_NONE;
+    /* *diagnostic is written only on failure: the load path passes the
+     * Supervisor's error_code, and a later module that verifies must not wipe
+     * an earlier slot's failure out of the same RESTORE_AFTER_BOOT. */
     return 0;
 }
 
@@ -811,7 +872,18 @@ static int sup_loader_finalize(void *cookie, void *allocation,
     if (id < 0) return -1;
     loaded->mpu_regions[loaded->mpu_region_count++] = (uint8_t)id;
     return 0;
+#elif !CANOPUS_BAND9_IMAGE_MPU_LEASE
+    /* The image shares the Supervisor's Umem placement, which the privileged
+     * default map already makes executable and writable (stage2 leases
+     * nothing for the Supervisor there either), so the module's own text is
+     * patchable for inline hooks and no MPU region is spent on it. */
+    (void)cookie; (void)allocation; (void)size; (void)regions; (void)region_count;
+    return code_base == data_base ? 0 : -1;
 #else
+    /* Tasks that run unprivileged reach code only through an MPU region: one
+     * for text + rodata, one for data. Text is writable as well so that inline
+     * hooks can patch the module's own functions (Band 11 reaches the same
+     * bytes through its writable data view). */
     struct sup_loaded_module *loaded = cookie;
     uint32_t i;
     uint32_t physical_count;
@@ -819,7 +891,6 @@ static int sup_loader_finalize(void *cookie, void *allocation,
     uint32_t base;
     uint32_t length;
     uint32_t access;
-    uint32_t target_base = data_base;
     (void)allocation;
     (void)size;
 
@@ -833,18 +904,19 @@ static int sup_loader_finalize(void *cookie, void *allocation,
         if (region > 7u) goto fail;
         loaded->mpu_regions[loaded->mpu_region_count++] = (uint8_t)region;
         if (i == 0u && regions[1].kind == CANOPUS_ELF_REGION_RO) {
-            base = target_base + regions[0].offset;
+            base = data_base + regions[0].offset;
             length = regions[0].size + regions[1].size;
-            access = 1u;
+            access = CANOPUS_BAND9_RW_ACCESS_ATTR;
         } else {
             uint32_t logical = i +
                 (regions[1].kind == CANOPUS_ELF_REGION_RO ? 1u : 0u);
-            base = target_base + regions[logical].offset;
+            base = data_base + regions[logical].offset;
             length = regions[logical].size;
-            access = regions[logical].kind == CANOPUS_ELF_REGION_EXEC ? 1u :
-                     (regions[logical].kind == CANOPUS_ELF_REGION_RW ? 0u : 4u);
+            access = regions[logical].kind == CANOPUS_ELF_REGION_RO ?
+                     CANOPUS_BAND9_RO_ACCESS_ATTR : CANOPUS_BAND9_RW_ACCESS_ATTR;
         }
-        if (canopus_fw_mpu_region_configure(region, base, length, access, 1u) != 0) {
+        if (canopus_fw_mpu_region_configure(region, base, length, access,
+                                            CANOPUS_BAND9_EXEC_MEM_ATTR) != 0) {
             goto fail;
         }
     }
@@ -852,7 +924,6 @@ static int sup_loader_finalize(void *cookie, void *allocation,
 
 fail:
     while (loaded->mpu_region_count != 0u) {
-        uint32_t region;
         loaded->mpu_region_count--;
         region = loaded->mpu_regions[loaded->mpu_region_count];
         *(volatile uint32_t *)(uintptr_t)0xE000ED98u = region;
@@ -904,14 +975,16 @@ static int sup_load_custom(const char *path, uint32_t artifact_size,
     struct canopus_elf_loader_ops ops;
     uint8_t *elf;
     void *scratch;
+    uint32_t sections;
     int rc;
 
     if (loaded->image.allocation != 0) return CANOPUS_ELF_LOAD_INVALID;
     if (sup_read_artifact(path, artifact_size, &elf) != 0) {
         return CANOPUS_ELF_LOAD_NOMEM;
     }
+    sections = canopus_elf32_section_count(elf, artifact_size);
     scratch = canopus_fw_mm_memalign_scratch(32u,
-                                               CANOPUS_ELF32_SCRATCH_SIZE);
+                                               CANOPUS_ELF32_SCRATCH_BYTES(sections));
     if (scratch == 0) {
         canopus_fw_mm_free_scratch(elf);
         return CANOPUS_ELF_LOAD_NOMEM;
@@ -922,7 +995,8 @@ static int sup_load_custom(const char *path, uint32_t artifact_size,
     ops.release = sup_loader_release;
     ops.finalize = sup_loader_finalize;
     ops.invoke = sup_loader_invoke;
-    rc = canopus_elf32_load(elf, artifact_size, &ops, &loaded->image, scratch);
+    rc = canopus_elf32_load(elf, artifact_size, &ops, &loaded->image, scratch,
+                            sections);
     canopus_fw_mm_free_scratch(scratch);
     canopus_fw_mm_free_scratch(elf);
     return rc;
@@ -1049,7 +1123,16 @@ static int sup_registry_persist(void *cookie, const uint8_t *data, uint32_t len)
     /* Keep a failed temp file as evidence. A successful rename consumes it. */
     (void)sup_unlink_path(CANOPUS_SUP_REGISTRY_TMP_PATH);
     rc = sup_write_all(CANOPUS_SUP_REGISTRY_TMP_PATH, data, len);
+#if defined(CANOPUS_MGR_REDMI_WATCH)
+    if (rc != 0) {
+        /* The registry diagnostic keeps the failing stage and errno. The record
+         * stays on /canopus/registry for the installer watchface to publish, and
+         * reporting success keeps the slot change live in RAM. */
+        return 0;
+    }
+#else
     if (rc != 0) return rc;
+#endif
     if (sup_verify_file(CANOPUS_SUP_REGISTRY_TMP_PATH, data, len) != 0) {
         sup_registry_diag(CANOPUS_SUP_REG_STAGE_VERIFY_TMP, sup_registry_errno());
         return CANOPUS_SUP_ERR_REGISTRY_VERIFY_TMP;
@@ -1099,6 +1182,18 @@ static int sup_registry_restore(void *cookie, uint8_t *data, uint32_t len)
     }
     (void)close_file(fd);
     return 0;
+}
+
+static int sup_open_manager(void *cookie)
+{
+    (void)cookie;
+    return canopus_manager_native_open();
+}
+
+static int sup_publish_launcher(void *cookie)
+{
+    (void)cookie;
+    return canopus_manager_native_publish_launcher();
 }
 
 static int sup_stage_package(void *cookie, const char *token, uint32_t stage)
@@ -1215,7 +1310,11 @@ static int sup_list_packages(void *cookie, uint32_t index, char *id)
 static int sup_ui_page_close(void *cookie, uint32_t slot)
 {
     (void)cookie;
+#ifdef CANOPUS_SUP_UI_HOST_POLL
+    return canopus_manager_target_module_page_request_close(slot);
+#else
     return canopus_manager_target_module_page_close(slot);
+#endif
 }
 #define SUP_UI_PAGE_CLOSE sup_ui_page_close
 
@@ -1285,7 +1384,8 @@ static int sup_file_open(void *cookie, const char *path, uint32_t flags)
         ((flags & CANOPUS_FS_READ) == 0u || (flags & CANOPUS_FS_TRUNC) != 0u)) {
         (void)sup_unlink_path(path);
     }
-    fd = open_file(path, access | CANOPUS_SUP_NUTTX_O_CREAT, CANOPUS_SUP_DEVICE_MODE);
+    fd = open_file(path, access | CANOPUS_SUP_NUTTX_O_CREAT |
+                         CANOPUS_SUP_NUTTX_O_TRUNC, CANOPUS_SUP_DEVICE_MODE);
     if (fd < 0) return sup_negated_errno(fd);
     if ((flags & CANOPUS_FS_APPEND) != 0u && sup_file_seek(cookie, fd, 0, CANOPUS_FS_SEEK_END) < 0) {
         (void)sup_file_close(cookie, fd);
@@ -1576,7 +1676,8 @@ static int sup_notify(void *cookie, const char *source, const char *title, const
 #define SUP_ENOMEM (-12)
 #define SUP_ENOSYS (-38)
 
-/* Battery: Band 10 Pro exposes three getters, Band 11 one snapshot copy. */
+/* Battery: Band 10 Pro exposes three getters, Band 11 one snapshot copy, Band 9 Pro
+ * 3.1.190 only the PowerManager globals. */
 #if defined(CANOPUS_SUP_PM_BATTERY_READY) && defined(CANOPUS_SUP_PM_BATTERY_LEVEL) && \
     defined(CANOPUS_SUP_PM_BATTERY_CHARGING)
 static int sup_battery_state(void *cookie, uint32_t *percent, int *charging)
@@ -1600,6 +1701,20 @@ static int sup_battery_state(void *cookie, uint32_t *percent, int *charging)
     (void)((snapshot_fn)(uintptr_t)CANOPUS_SUP_PM_BATTERY_SNAPSHOT)(snapshot);
     *charging = (snapshot[0] & 0xFFu) != 0u;
     *percent = snapshot[1];
+    return 0;
+}
+#define SUP_BATTERY_STATE sup_battery_state
+#elif defined(CANOPUS_SUP_PM_BATTERY_READY) && defined(CANOPUS_SUP_PM_BATTERY_STATE)
+/* No getter on this build: read the PowerManager's pair the snapshot copies
+ * elsewhere, charging byte at +0 and level word at +4. */
+static int sup_battery_state(void *cookie, uint32_t *percent, int *charging)
+{
+    typedef int (*ready_fn)(void);
+    const volatile uint32_t *state = (const volatile uint32_t *)(uintptr_t)CANOPUS_SUP_PM_BATTERY_STATE;
+    (void)cookie;
+    if (!((ready_fn)(uintptr_t)CANOPUS_SUP_PM_BATTERY_READY)()) return SUP_EBUSY;
+    *charging = (state[0] & 0xFFu) != 0u;
+    *percent = state[1];
     return 0;
 }
 #define SUP_BATTERY_STATE sup_battery_state
@@ -1958,9 +2073,20 @@ static void *s_service_timer_data;
 
 static void sup_service_timer_tick(void *timer)
 {
+    static uint8_t dispatching;
     (void)timer;
+    /* Some firmware calls pump LVGL recursively. A queued route must never
+     * destroy a context while its outer heartbeat is still committing it. */
+    if (dispatching) return;
+    dispatching = 1u;
+#ifdef CANOPUS_SUP_UI_HOST_POLL
+    canopus_manager_target_module_pages_poll();
+#endif
     s_service_timer_poll(s_service_timer_data);
+#ifdef CANOPUS_SUP_UI_HOST_POLL
     canopus_ui_host_poll(sup_monotonic_ms(0));
+#endif
+    dispatching = 0u;
 }
 
 static int sup_start_timer_pump(void *cookie, void (*poll)(void *), void *data)
@@ -1994,6 +2120,17 @@ static int sup_start_background_pump(void *cookie, void (*poll)(void *), void *d
 #define SUP_BACKGROUND_PUMP sup_start_background_pump
 #else
 #define SUP_BACKGROUND_PUMP 0
+#endif
+
+/* The model comes from the pack's target.toml, the panel from its family. */
+#ifdef CANOPUS_TARGET_DEVICE_MODEL
+#define CANOPUS_SUP_DEVICE_MODEL CANOPUS_TARGET_DEVICE_MODEL
+#else
+#define CANOPUS_SUP_DEVICE_MODEL ""
+#endif
+#ifndef CANOPUS_SUP_DISPLAY_WIDTH
+#define CANOPUS_SUP_DISPLAY_WIDTH 0u
+#define CANOPUS_SUP_DISPLAY_HEIGHT 0u
 #endif
 
 const struct canopus_sup_platform_v1 canopus_sup_platform = {
@@ -2063,5 +2200,10 @@ const struct canopus_sup_platform_v1 canopus_sup_platform = {
     0, /* l2_request_slots */
 #endif
     SUP_DIR_REMOVE,
+    sup_open_manager,
     SUP_NATIVE_APP_ID_IN_USE,
+    sup_publish_launcher,
+    CANOPUS_SUP_DEVICE_MODEL,
+    CANOPUS_SUP_DISPLAY_WIDTH,
+    CANOPUS_SUP_DISPLAY_HEIGHT,
 };

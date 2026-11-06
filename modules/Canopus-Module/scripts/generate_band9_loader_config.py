@@ -58,10 +58,16 @@ def validate(profile: dict, target: dict) -> tuple[dict, dict, dict, dict, dict]
     stage0_result = number(stage0.get("result_word"), "stage0.result_word")
     original_words_known = stage0.get("original_words_known", True)
     requires_mpu_sync = stage0.get("requires_mpu_sync", False)
+    stage0_mpu = stage0.get("stage0_mpu", True)
+    image_mpu_lease = stage0.get("image_mpu_lease", False)
+    if not isinstance(image_mpu_lease, bool):
+        raise SystemExit("stage0.image_mpu_lease must be boolean")
     if not isinstance(original_words_known, bool):
         raise SystemExit("stage0.original_words_known must be boolean")
     if not isinstance(requires_mpu_sync, bool):
         raise SystemExit("stage0.requires_mpu_sync must be boolean")
+    if not isinstance(stage0_mpu, bool):
+        raise SystemExit("stage0.stage0_mpu must be boolean")
     if stage0_region >= number(architecture.get("mpu_region_count"),
                               "architecture.mpu_region_count"):
         raise SystemExit("stage0.stage0_region is outside the MPU region count")
@@ -71,10 +77,15 @@ def validate(profile: dict, target: dict) -> tuple[dict, dict, dict, dict, dict]
             or stage0_base <= stage0_result < stage0_base + stage0_exec_size:
         raise SystemExit("stage0 must be an aligned region containing result_word")
 
+    # A cave-entry installer writes stage 0 with NSH mw and enters it from the
+    # watchface trampoline; it never calls the exec/mw command handlers (only
+    # the mailbox probe does), so those two entries may stay unresolved there.
+    cave_entry = profile.get("stage", {}).get("entry_mode", "mailbox") == "cave"
     firmware_entries = [
         "exec_handler", "mw_handler", "open", "close", "read", "memalign", "free",
         "kmem_malloc", "kmem_free", "mpu_alloc", "mpu_configure", "mpu_release",
     ]
+    optional_entries = {"exec_handler", "mw_handler"} if cave_entry else set()
     if requires_mpu_sync and "mpu_sync" not in firmware:
         raise SystemExit("stage0.requires_mpu_sync needs an exact firmware.mpu_sync entry")
     if "mpu_sync" in firmware:
@@ -82,6 +93,8 @@ def validate(profile: dict, target: dict) -> tuple[dict, dict, dict, dict, dict]
     if requires_mpu_sync:
         firmware_entries.extend(("inode_lock", "inode_reserve", "inode_unlock"))
     for key in firmware_entries:
+        if key in optional_entries:
+            continue
         if key not in firmware:
             raise SystemExit(f"firmware.{key} is required")
         entry = number(firmware[key], f"firmware.{key}")
@@ -164,6 +177,8 @@ def write_header(path: pathlib.Path, profile: dict, stage0: dict, firmware: dict
     }
     if "mpu_sync" in firmware:
         mapping["CANOPUS_FW_MPU_SYNC"] = firmware["mpu_sync"] | 1
+    if "mpu_bitmap" in firmware:
+        mapping["CANOPUS_MPU_BITMAP"] = firmware["mpu_bitmap"]
     if "inode_lock" in firmware:
         mapping["CANOPUS_FW_INODE_LOCK"] = firmware["inode_lock"] | 1
         mapping["CANOPUS_FW_INODE_RESERVE"] = firmware["inode_reserve"] | 1
@@ -176,6 +191,7 @@ def write_header(path: pathlib.Path, profile: dict, stage0: dict, firmware: dict
         f"#define CANOPUS_BAND9_EXEC_MEM_ATTR {number(architecture['exec_mem_attr'], 'architecture.exec_mem_attr')}u",
         f"#define CANOPUS_BAND9_RO_ACCESS_ATTR {number(architecture['ro_access_attr'], 'architecture.ro_access_attr')}u",
         f"#define CANOPUS_BAND9_RW_ACCESS_ATTR {number(architecture['rw_access_attr'], 'architecture.rw_access_attr')}u",
+        f"#define CANOPUS_BAND9_IMAGE_MPU_LEASE {1 if stage0.get('image_mpu_lease', False) else 0}",
         "",
         "#endif",
         "",
@@ -195,6 +211,7 @@ def write_lua(path: pathlib.Path, profile: dict, firmware: dict, architecture: d
         f"    status = {profile['status']!r},",
         f"    device_status = {profile.get('device_status', 'NOT_PROBED')!r},",
         f"    loader_family = {profile['loader_family']!r},",
+        f"    entry_mode = {profile.get('stage', {}).get('entry_mode', 'mailbox')!r},",
         field("exec_handler", firmware["exec_handler"] | 1),
         field("mw_handler", firmware["mw_handler"] | 1),
         field("open", firmware["open"] | 1),
@@ -211,6 +228,10 @@ def write_lua(path: pathlib.Path, profile: dict, firmware: dict, architecture: d
             [field("mpu_sync", firmware["mpu_sync"] | 1)]
             if "mpu_sync" in firmware else []
         ),
+        *(
+            [field("mpu_bitmap", firmware["mpu_bitmap"])]
+            if "mpu_bitmap" in firmware else []
+        ),
         field("mpu_rnr", architecture["mpu_rnr"]),
         field("mpu_rbar", architecture["mpu_rbar"]),
         field("mpu_rlar", architecture["mpu_rlar"]),
@@ -223,6 +244,7 @@ def write_lua(path: pathlib.Path, profile: dict, firmware: dict, architecture: d
         field("stage0_size", stage0["size"]),
         field("stage0_region", stage0["stage0_region"]),
         field("stage0_exec_size", stage0["exec_size"]),
+        f"    stage0_mpu = {lua_bool(stage0.get('stage0_mpu', True))},",
         f"    cave_original_known = {lua_bool(stage0.get('original_words_known', True))},",
         "    cave_original = {",
     ]

@@ -74,6 +74,7 @@ struct svc_mem_block {
 
 static struct svc_mem_block *s_mem_head[CANOPUS_SUP_MODULE_SLOTS];
 static uint32_t s_notify_posts[CANOPUS_SUP_MODULE_SLOTS];
+static uint32_t s_notify_window[CANOPUS_SUP_MODULE_SLOTS];
 
 /* KV values stay in each module's file: every operation scans it one entry at
  * a time through s_kv_entry, so the table costs no resident memory. */
@@ -1191,9 +1192,8 @@ static void svc_timers_poll(struct canopus_supervisor_v1 *sup, int foreground)
     svc_haptic_poll(now);
     svc_events_poll(now);
     svc_timers_dispatch(now, 0);
-    /* Foreground boot stages share this guard, never a generic poll. Run last
-     * so work queued by registration/activation waits for another owner turn.
-     * The boot state machine rejects this source on background-start targets. */
+    /* Run last under the dispatch guard: work posted by activation waits for
+     * another owner turn, and nested polls cannot reenter registration. */
     if (foreground) canopus_supervisor_boot_poll(sup, 1);
     s_timer_dispatching = 0;
 }
@@ -1642,19 +1642,13 @@ static void svc_wakelocks_release(uint32_t slot)
     }
 }
 
+/* The pack's panel; 0 x 0 when it does not say rather than another device's. */
 static void svc_display_get_resolution(const struct canopus_context_v1 *ctx, uint32_t *width, uint32_t *height)
 {
-    const char *target = (ctx != 0 && ctx->target_id != 0) ? ctx->target_id : "";
+    (void)ctx;
     if (width == 0 || height == 0) return;
-    if (target[12] == '1' && target[13] == '1') {
-        /* Band 11: 212 x 520 */
-        *width = 212u;
-        *height = 520u;
-    } else {
-        /* Band 10 Pro: 336 x 480 */
-        *width = 336u;
-        *height = 480u;
-    }
+    *width = (s_sup != 0 && s_sup->platform != 0) ? s_sup->platform->display_width : 0u;
+    *height = (s_sup != 0 && s_sup->platform != 0) ? s_sup->platform->display_height : 0u;
 }
 
 /* ---- BUS (Inter-Module Event Bus) ------------------------------------ */
@@ -1891,6 +1885,15 @@ static int32_t svc_notify_send(const struct canopus_context_v1 *ctx, const char 
     const char *source;
     int rc;
     if (!svc_slot_valid(ctx) || body == 0) return CANOPUS_SVC_ERR_ARGUMENT;
+    /* NOTIFY is independent of TIME. Without a clock, retain the cumulative
+     * quota until service release; a renewal interval cannot be measured. */
+    if (s_sup->platform != 0 && s_sup->platform->monotonic_ms != 0) {
+        uint32_t now = svc_now(s_sup);
+        if ((uint32_t)(now - s_notify_window[ctx->slot]) >= CANOPUS_NOTIFY_WINDOW_MS) {
+            s_notify_window[ctx->slot] = now;
+            s_notify_posts[ctx->slot] = 0u;
+        }
+    }
     if (s_notify_posts[ctx->slot] >= CANOPUS_NOTIFY_MAX_POSTS) return CANOPUS_SVC_ERR_STATE;
     if (s_sup->platform == 0 || s_sup->platform->notify == 0) {
         return CANOPUS_SVC_ERR_UNSUPPORTED;
@@ -1954,11 +1957,10 @@ static const char *svc_system_module_id(const struct canopus_context_v1 *ctx)
 
 static const char *svc_system_device_model(const struct canopus_context_v1 *ctx)
 {
-    const char *target = svc_system_target_id(ctx);
-    if (target[12] == '1' && target[13] == '1') {
-        return "Xiaomi Band 11";
-    }
-    return "Xiaomi Band 10 Pro";
+    (void)ctx;
+    return (s_sup != 0 && s_sup->platform != 0 && s_sup->platform->device_model != 0)
+               ? s_sup->platform->device_model
+               : "";
 }
 
 static const char *svc_system_firmware_version(const struct canopus_context_v1 *ctx)
@@ -2148,6 +2150,7 @@ static int32_t svc_ui_set_entry(const struct canopus_context_v1 *ctx,
                                 const struct canopus_ui_entry_v1 *entry)
 {
     uint32_t len = 0u;
+    struct canopus_ui_entry_v1 normalized;
     if (!svc_slot_valid(ctx)) return CANOPUS_SVC_ERR_STATE;
     if (s_sup->platform == 0 || s_sup->platform->ui_page_close == 0) {
         return CANOPUS_SVC_ERR_UNSUPPORTED;
@@ -2157,9 +2160,18 @@ static int32_t svc_ui_set_entry(const struct canopus_context_v1 *ctx,
         (void)s_sup->platform->ui_page_close(s_sup->platform_cookie, ctx->slot);
         return CANOPUS_SVC_OK;
     }
-    if (entry->struct_size != sizeof(*entry) || entry->on_open == 0) {
-        return CANOPUS_SVC_ERR_ARGUMENT;
-    }
+    /* Accept the complete legacy prefixes without reading their appended
+     * fields: modules built before page_count (single-page) or before
+     * on_resume (multi-page without transitions). */
+    if (entry->struct_size != offsetof(struct canopus_ui_entry_v1, page_count) &&
+        entry->struct_size != offsetof(struct canopus_ui_entry_v1, on_resume) &&
+        entry->struct_size != sizeof(*entry)) return CANOPUS_SVC_ERR_ARGUMENT;
+    canopus_memset(&normalized, 0, sizeof(normalized));
+    canopus_memcpy(&normalized, entry, entry->struct_size);
+    normalized.struct_size = sizeof(normalized);
+    entry = &normalized;
+    if (entry->on_open == 0 || (entry->page_count > 1u &&
+        (entry->on_resume == 0 || entry->on_pause == 0))) return CANOPUS_SVC_ERR_ARGUMENT;
     if (entry->page_count > CANOPUS_UI_ENTRY_PAGES_MAX) {
         return CANOPUS_SVC_ERR_ARGUMENT;
     }
@@ -2308,6 +2320,7 @@ void canopus_supervisor_services_bind(struct canopus_supervisor_v1 *sup)
     canopus_memset(s_fd, 0, sizeof(s_fd));
     canopus_memset(s_mem_head, 0, sizeof(s_mem_head));
     canopus_memset(s_notify_posts, 0, sizeof(s_notify_posts));
+    canopus_memset(s_notify_window, 0, sizeof(s_notify_window));
     canopus_memset(s_timers, 0, sizeof(s_timers));
     s_timer_dispatching = 0;
     s_timer_pump_started = 0;
@@ -2548,6 +2561,24 @@ const struct canopus_context_v1 *canopus_supervisor_context(
     struct canopus_supervisor_v1 *sup, uint32_t slot)
 {
     if (sup == 0 || sup != s_sup || slot >= CANOPUS_SUP_MODULE_SLOTS) return 0;
+    /* Some staged targets publish their clock after the Supervisor constructor
+     * has bound the initial contexts. Refresh only the platform-dependent Time
+     * group; do not reset live timers, hooks or other bound service state. */
+    if (s_services.group_version[CANOPUS_SVC_TIME] == 0u &&
+        sup->platform != 0 && sup->platform->monotonic_ms != 0) {
+        s_services.group_version[CANOPUS_SVC_TIME] =
+            sup->platform->start_background_pump != 0 ? 2u : 1u;
+        s_time_obj.monotonic_ms = svc_time_monotonic_ms;
+        s_time_obj.realtime_ms = svc_time_realtime_ms;
+        s_time_obj.sleep_ms = svc_time_sleep_ms;
+        s_time_obj.timer_create = svc_time_timer_create;
+        s_time_obj.timer_start = svc_time_timer_start;
+        s_time_obj.timer_stop = svc_time_timer_stop;
+        s_time_obj.timer_destroy = svc_time_timer_destroy;
+        s_time_obj.timer_set_background = svc_time_timer_set_background;
+    }
+    s_contexts[slot].time =
+        s_services.group_version[CANOPUS_SVC_TIME] != 0u ? &s_time_obj : 0;
     return &s_contexts[slot];
 }
 
@@ -2613,6 +2644,7 @@ void canopus_supervisor_release_services(struct canopus_supervisor_v1 *sup,
         }
     }
     s_notify_posts[slot] = 0u;
+    s_notify_window[slot] = svc_now(s_sup);
 
     /* Release allocated memory blocks */
     if (sup->platform != 0 && sup->platform->heap_release != 0) {

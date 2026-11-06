@@ -3,8 +3,11 @@
  * target_id: redmi-watch-6-3.100.043
  * firmware : 3.100.043 (d516af0:nx_best1502p_ap)
  * sha256   : a19b601477569765103eaf468b937bd8026b4d68ffa5c896bde222a79e475858
- * revision : 1
- * input_digest: 214184d6d74a03f7
+ * revision : 3
+ * input_digest: 7e8f018e53e0833f
+ * STATIC TEST ABI: restricted STATIC_RECOVERED records are
+* emitted as addresses for loader bring-up. This is not an
+* approval and must not be shipped as a production artifact.
  */
 #ifndef CANOPUS_VENEER_REDMI_WATCH_6_3_100_043_H
 #define CANOPUS_VENEER_REDMI_WATCH_6_3_100_043_H
@@ -15,9 +18,19 @@
 /* Explicit padding reproduces the exact recovered byte layout
  * even when fields are sparse (e.g. launcher_order_record). */
 typedef struct stock_timespec_t stock_timespec_t;
+typedef struct file_operations file_operations;
 struct stock_timespec_t {
     int64_t tv_sec; /* +0x0 */
     int32_t tv_nsec; /* +0x8 */
+};
+struct file_operations {
+    void * open; /* +0x0 */
+    void * close; /* +0x4 */
+    void * read; /* +0x8 */
+    void * write; /* +0xc */
+    void * lseek; /* +0x10 */
+    void * ioctl; /* +0x14 */
+    uint8_t _tail[24];
 };
 
 /* ---- runtime identity guard ---- */
@@ -32,26 +45,947 @@ static inline int canopus_identity_guard(void)
     const char *const expect_version = "3.100.043";
     const char *const expect_build = "d516af0:nx_best1502p_ap";
     const char *const actual_version = (const char *)(uintptr_t)0x0C3BF9FD;
-    const char *const actual_build = (const char *)(uintptr_t)0x0C3BFA25;
+    const char *const actual_build = (const char *)(uintptr_t)0x0cbff458;
     if (canopus_identity_token_neq(actual_version, expect_version)) return -1;
     if (canopus_identity_token_neq(actual_build, expect_build)) return -1;
     return 0;
 }
 
 /* ---- typed veneers ---- */
+/* Recovered global `legacy_extension_list` at 0x3c3cf238. */
+#define canopus_fw_legacy_extension_list ((void *)(uintptr_t)0x3c3cf238u)
+
+typedef void (*canopus_fw_lv_img_set_src_fn)(void *, const void *);
+static inline void canopus_fw_lv_img_set_src(void * a0, const void * a1) {
+    return ((canopus_fw_lv_img_set_src_fn)(uintptr_t)0xc78acf1)(a0, a1);
+}
+
+typedef void (*canopus_fw_lv_obj_set_style_pad_top_fn)(void *, int32_t, uint32_t);
+static inline void canopus_fw_lv_obj_set_style_pad_top(void * a0, int32_t a1, uint32_t a2) {
+    return ((canopus_fw_lv_obj_set_style_pad_top_fn)(uintptr_t)0x37eec1)(a0, a1, a2);
+}
+
+typedef void * (*canopus_fw_heap_malloc_fn)(uint32_t);
+static inline void * canopus_fw_heap_malloc(uint32_t a0) {
+    return ((canopus_fw_heap_malloc_fn)(uintptr_t)0xc50b2a1)(a0);
+}
+
+typedef int (*canopus_fw_lvx_list_item_add_content_fn)(void *, const void *, const char *, const char *, const char *, uint32_t, uint32_t);
+static inline int canopus_fw_lvx_list_item_add_content(void * a0, const void * a1, const char * a2, const char * a3, const char * a4, uint32_t a5, uint32_t a6) {
+    return ((canopus_fw_lvx_list_item_add_content_fn)(uintptr_t)0x1c129691)(a0, a1, a2, a3, a4, a5, a6);
+}
+
+typedef int (*canopus_fw_property_get_int32_fn)(const char *, int);
+static inline int canopus_fw_property_get_int32(const char * a0, int a1) {
+    return ((canopus_fw_property_get_int32_fn)(uintptr_t)0xcb93a25)(a0, a1);
+}
+
+/* scan_create_filtered: skipped (argument type not mappable) */
+typedef void (*canopus_fw_lvx_object_align_fn)(void *, uint32_t, int32_t, int32_t);
+static inline void canopus_fw_lvx_object_align(void * a0, uint32_t a1, int32_t a2, int32_t a3) {
+    return ((canopus_fw_lvx_object_align_fn)(uintptr_t)0xc258a5d)(a0, a1, a2, a3);
+}
+
+typedef int (*canopus_fw_register_driver_fn)(const char *, const void *, uint32_t, void *);
+static inline int canopus_fw_register_driver(const char * a0, const void * a1, uint32_t a2, void * a3) {
+    return ((canopus_fw_register_driver_fn)(uintptr_t)0x1c15a955)(a0, a1, a2, a3);
+}
+
+/* Recovered global `ferry_framework_vtable` at 0x3c32e0d0. */
+#define canopus_fw_ferry_framework_vtable ((void *)(uintptr_t)0x3c32e0d0u)
+
+typedef void * (*canopus_fw_l2cap_find_channel_fn)(void *, uint16_t);
+static inline void * canopus_fw_l2cap_find_channel(void * a0, uint16_t a1) {
+    return ((canopus_fw_l2cap_find_channel_fn)(uintptr_t)0x1c065c19)(a0, a1);
+}
+
+typedef int (*canopus_fw_interconnect_close_fn)(void *);
+static inline int canopus_fw_interconnect_close(void * a0) {
+    return ((canopus_fw_interconnect_close_fn)(uintptr_t)0xc62df51)(a0);
+}
+
+typedef void * (*canopus_fw_p65_calendar_image_create_fn)(void *);
+static inline void * canopus_fw_p65_calendar_image_create(void * a0) {
+    return ((canopus_fw_p65_calendar_image_create_fn)(uintptr_t)0xc78a961)(a0);
+}
+
+typedef void * (*canopus_fw_lv_obj_create_fn)(void *);
+static inline void * canopus_fw_lv_obj_create(void * a0) {
+    return ((canopus_fw_lv_obj_create_fn)(uintptr_t)0x387b79)(a0);
+}
+
+typedef void (*canopus_fw_font_reload_drop_face_id_fn)(void *, const char *);
+static inline void canopus_fw_font_reload_drop_face_id(void * a0, const char * a1) {
+    return ((canopus_fw_font_reload_drop_face_id_fn)(uintptr_t)0xc734279)(a0, a1);
+}
+
+typedef int (*canopus_fw_p65_calendar_font_release_fn)(void *, void *);
+static inline int canopus_fw_p65_calendar_font_release(void * a0, void * a1) {
+    return ((canopus_fw_p65_calendar_font_release_fn)(uintptr_t)0xc795fe5)(a0, a1);
+}
+
+typedef void (*canopus_fw_mpu_region_release_fn)(uint32_t);
+static inline void canopus_fw_mpu_region_release(uint32_t a0) {
+    return ((canopus_fw_mpu_region_release_fn)(uintptr_t)0xc966671)(a0);
+}
+
+/* bt_timer_cancel: skipped (argument type not mappable) */
+/* open: skipped (argument type not mappable) */
+/* qjs_new_array_buffer_copy: skipped (return type 'uint64_t qjs_new_array_buffer_copy' not mappable) */
+typedef void (*canopus_fw_wakelock_acquire_fn)(void *);
+static inline void canopus_fw_wakelock_acquire(void * a0) {
+    return ((canopus_fw_wakelock_acquire_fn)(uintptr_t)0xca61ffd)(a0);
+}
+
+typedef void (*canopus_fw_p65_bg_notification_scroll_fn)(void *);
+static inline void canopus_fw_p65_bg_notification_scroll(void * a0) {
+    return ((canopus_fw_p65_bg_notification_scroll_fn)(uintptr_t)0xc8078d5)(a0);
+}
+
+/* Recovered global `font_reload_lv_initialized` at 0x3c450030. */
+#define canopus_fw_font_reload_lv_initialized ((void *)(uintptr_t)0x3c450030u)
+
+typedef void * (*canopus_fw_launcher_load_app_info_fn)(const void *);
+static inline void * canopus_fw_launcher_load_app_info(const void * a0) {
+    return ((canopus_fw_launcher_load_app_info_fn)(uintptr_t)0xc7ebd11)(a0);
+}
+
+typedef int (*canopus_fw_screen_turn_on_fn)(const char *, int);
+static inline int canopus_fw_screen_turn_on(const char * a0, int a1) {
+    return ((canopus_fw_screen_turn_on_fn)(uintptr_t)0xca69201)(a0, a1);
+}
+
+/* advertising_create: skipped (argument type not mappable) */
+/* Recovered global `style_misans_medium_24` at 0x3c479828. */
+#define canopus_fw_style_misans_medium_24 ((void *)(uintptr_t)0x3c479828u)
+
+typedef void (*canopus_fw_lv_obj_remove_style_all_fn)(void *);
+static inline void canopus_fw_lv_obj_remove_style_all(void * a0) {
+    return ((canopus_fw_lv_obj_remove_style_all_fn)(uintptr_t)0x37e8d1)(a0);
+}
+
+typedef void (*canopus_fw_lvx_object_add_flag_fn)(void *, uint32_t);
+static inline void canopus_fw_lvx_object_add_flag(void * a0, uint32_t a1) {
+    return ((canopus_fw_lvx_object_add_flag_fn)(uintptr_t)0xc256a1d)(a0, a1);
+}
+
+typedef int (*canopus_fw_power_battery_ready_fn)(void);
+static inline int canopus_fw_power_battery_ready(void) {
+    return ((canopus_fw_power_battery_ready_fn)(uintptr_t)0xca61d21)();
+}
+
+typedef void (*canopus_fw_font_reload_list_remove_fn)(void *, void *);
+static inline void canopus_fw_font_reload_list_remove(void * a0, void * a1) {
+    return ((canopus_fw_font_reload_list_remove_fn)(uintptr_t)0xc73e08d)(a0, a1);
+}
+
+/* Recovered global `font_reload_display_list` at 0x3c450034. */
+#define canopus_fw_font_reload_display_list ((void *)(uintptr_t)0x3c450034u)
+
+/* qjs_is_function: skipped (return type 'int qjs_is_function' not mappable) */
+typedef void (*canopus_fw_scan_stop_fn)(void *, void *);
+static inline void canopus_fw_scan_stop(void * a0, void * a1) {
+    return ((canopus_fw_scan_stop_fn)(uintptr_t)0x1c00ab29)(a0, a1);
+}
+
+typedef void (*canopus_fw_lv_label_set_text_fn)(void *, const char *);
+static inline void canopus_fw_lv_label_set_text(void * a0, const char * a1) {
+    return ((canopus_fw_lv_label_set_text_fn)(uintptr_t)0xc78c879)(a0, a1);
+}
+
+typedef void (*canopus_fw_lv_obj_update_layout_fn)(void *);
+static inline void canopus_fw_lv_obj_update_layout(void * a0) {
+    return ((canopus_fw_lv_obj_update_layout_fn)(uintptr_t)0x37ab0d)(a0);
+}
+
+/* Recovered global `font_reload_uikit_slot` at 0x3c450210. */
+#define canopus_fw_font_reload_uikit_slot ((void *)(uintptr_t)0x3c450210u)
+
+typedef int (*canopus_fw_lvx_list_item_update_fn)(void *, const void *, const char *, const char *, const char *, uint32_t);
+static inline int canopus_fw_lvx_list_item_update(void * a0, const void * a1, const char * a2, const char * a3, const char * a4, uint32_t a5) {
+    return ((canopus_fw_lvx_list_item_update_fn)(uintptr_t)0x1c129935)(a0, a1, a2, a3, a4, a5);
+}
+
+/* Recovered global `style_misans_medium_28` at 0x3c479840. */
+#define canopus_fw_style_misans_medium_28 ((void *)(uintptr_t)0x3c479840u)
+
+typedef void * (*canopus_fw_font_reload_lv_malloc_fn)(uint32_t);
+static inline void * canopus_fw_font_reload_lv_malloc(uint32_t a0) {
+    return ((canopus_fw_font_reload_lv_malloc_fn)(uintptr_t)0xc741b0d)(a0);
+}
+
+typedef void (*canopus_fw_lv_label_set_long_mode_fn)(void *, uint32_t);
+static inline void canopus_fw_lv_label_set_long_mode(void * a0, uint32_t a1) {
+    return ((canopus_fw_lv_label_set_long_mode_fn)(uintptr_t)0xc78c995)(a0, a1);
+}
+
+typedef void * (*canopus_fw_mm_memalign_default_fn)(uint32_t, uint32_t);
+static inline void * canopus_fw_mm_memalign_default(uint32_t a0, uint32_t a1) {
+    return ((canopus_fw_mm_memalign_default_fn)(uintptr_t)0xc50b2c9)(a0, a1);
+}
+
+typedef void (*canopus_fw_native_font_release_fn)(void *, void *);
+static inline void canopus_fw_native_font_release(void * a0, void * a1) {
+    return ((canopus_fw_native_font_release_fn)(uintptr_t)0xc795fe5)(a0, a1);
+}
+
+typedef int (*canopus_fw_p65_calendar_snapshot_fn)(void *, uint32_t, void *);
+static inline int canopus_fw_p65_calendar_snapshot(void * a0, uint32_t a1, void * a2) {
+    return ((canopus_fw_p65_calendar_snapshot_fn)(uintptr_t)0xc7417c1)(a0, a1, a2);
+}
+
+typedef int (*canopus_fw_fsync_fn)(int);
+static inline int canopus_fw_fsync(int a0) {
+    return ((canopus_fw_fsync_fn)(uintptr_t)0x1c159e89)(a0);
+}
+
+typedef void * (*canopus_fw_lvx_page_content_create_fn)(void *);
+static inline void * canopus_fw_lvx_page_content_create(void * a0) {
+    return ((canopus_fw_lvx_page_content_create_fn)(uintptr_t)0xc2182b1)(a0);
+}
+
+typedef void (*canopus_fw_p65_calendar_native_wait_fn)(void *);
+static inline void canopus_fw_p65_calendar_native_wait(void * a0) {
+    return ((canopus_fw_p65_calendar_native_wait_fn)(uintptr_t)0xc72ef2d)(a0);
+}
+
+typedef void (*canopus_fw_p65_calendar_cache_clean_fn)(void *, const void *);
+static inline void canopus_fw_p65_calendar_cache_clean(void * a0, const void * a1) {
+    return ((canopus_fw_p65_calendar_cache_clean_fn)(uintptr_t)0xc72f02d)(a0, a1);
+}
+
+typedef void (*canopus_fw_uv_mutex_lock_fn)(void *);
+static inline void canopus_fw_uv_mutex_lock(void * a0) {
+    return ((canopus_fw_uv_mutex_lock_fn)(uintptr_t)0xc62935d)(a0);
+}
+
+/* lv_indev_get_point: skipped (argument type not mappable) */
+typedef void (*canopus_fw_p67_blur_draw_buf_destroy_fn)(uint32_t);
+static inline void canopus_fw_p67_blur_draw_buf_destroy(uint32_t a0) {
+    return ((canopus_fw_p67_blur_draw_buf_destroy_fn)(uintptr_t)0xc719799)(a0);
+}
+
+typedef void (*canopus_fw_heap_free_fn)(void *);
+static inline void canopus_fw_heap_free(void * a0) {
+    return ((canopus_fw_heap_free_fn)(uintptr_t)0xc50b25d)(a0);
+}
+
+typedef void (*canopus_fw_p65_calendar_cache_invalidate_fn)(void *, uint32_t, uint32_t, uint32_t);
+static inline void canopus_fw_p65_calendar_cache_invalidate(void * a0, uint32_t a1, uint32_t a2, uint32_t a3) {
+    return ((canopus_fw_p65_calendar_cache_invalidate_fn)(uintptr_t)0xc72f021)(a0, a1, a2, a3);
+}
+
+typedef void * (*canopus_fw_p65_calendar_root_create_fn)(void *);
+static inline void * canopus_fw_p65_calendar_root_create(void * a0) {
+    return ((canopus_fw_p65_calendar_root_create_fn)(uintptr_t)0xc8bef19)(a0);
+}
+
+typedef int (*canopus_fw_app_launcher_del_fn)(uint16_t);
+static inline int canopus_fw_app_launcher_del(uint16_t a0) {
+    return ((canopus_fw_app_launcher_del_fn)(uintptr_t)0xc7ec53d)(a0);
+}
+
+typedef int64_t (*canopus_fw_lseek_fn)(int, int64_t, int);
+static inline int64_t canopus_fw_lseek(int a0, int64_t a1, int a2) {
+    return ((canopus_fw_lseek_fn)(uintptr_t)0x1c157b91)(a0, a1, a2);
+}
+
+typedef void * (*canopus_fw_wakelock_create_fn)(uint32_t, const char *);
+static inline void * canopus_fw_wakelock_create(uint32_t a0, const char * a1) {
+    return ((canopus_fw_wakelock_create_fn)(uintptr_t)0xca61e9d)(a0, a1);
+}
+
+typedef void * (*canopus_fw_screen_session_create_fn)(const char *);
+static inline void * canopus_fw_screen_session_create(const char * a0) {
+    return ((canopus_fw_screen_session_create_fn)(uintptr_t)0xca68abd)(a0);
+}
+
+/* Recovered global `system_state` at 0x3c47a328. */
+#define canopus_fw_system_state ((void *)(uintptr_t)0x3c47a328u)
+
+typedef void (*canopus_fw_p65_bg_clear_flag_fn)(void *, uint32_t);
+static inline void canopus_fw_p65_bg_clear_flag(void * a0, uint32_t a1) {
+    return ((canopus_fw_p65_bg_clear_flag_fn)(uintptr_t)0x387c45)(a0, a1);
+}
+
+typedef const char * (*canopus_fw_p65_calendar_localized_fn)(const char *);
+static inline const char * canopus_fw_p65_calendar_localized(const char * a0) {
+    return ((canopus_fw_p65_calendar_localized_fn)(uintptr_t)0xc4f8459)(a0);
+}
+
+typedef uint32_t (*canopus_fw_p65_bg_event_count_fn)(void *);
+static inline uint32_t canopus_fw_p65_bg_event_count(void * a0) {
+    return ((canopus_fw_p65_bg_event_count_fn)(uintptr_t)0x3880c1)(a0);
+}
+
+typedef void (*canopus_fw_p65_calendar_size_fn)(void *, int32_t, int32_t);
+static inline void canopus_fw_p65_calendar_size(void * a0, int32_t a1, int32_t a2) {
+    return ((canopus_fw_p65_calendar_size_fn)(uintptr_t)0x378739)(a0, a1, a2);
+}
+
+typedef void (*canopus_fw_lv_cache_drop_fn)(uint32_t, const void *, void *);
+static inline void canopus_fw_lv_cache_drop(uint32_t a0, const void * a1, void * a2) {
+    return ((canopus_fw_lv_cache_drop_fn)(uintptr_t)0xc73baa9)(a0, a1, a2);
+}
+
+typedef void (*canopus_fw_lv_obj_scroll_to_fn)(void *, int32_t, int32_t, uint32_t);
+static inline void canopus_fw_lv_obj_scroll_to(void * a0, int32_t a1, int32_t a2, uint32_t a3) {
+    return ((canopus_fw_lv_obj_scroll_to_fn)(uintptr_t)0x37c1b9)(a0, a1, a2, a3);
+}
+
+typedef void (*canopus_fw_advertising_stop_fn)(void *, void *);
+static inline void canopus_fw_advertising_stop(void * a0, void * a1) {
+    return ((canopus_fw_advertising_stop_fn)(uintptr_t)0x1c00a9ad)(a0, a1);
+}
+
+/* qjs_new_object: skipped (return type 'uint64_t qjs_new_object' not mappable) */
+typedef void (*canopus_fw_wakelock_release_fn)(void *);
+static inline void canopus_fw_wakelock_release(void * a0) {
+    return ((canopus_fw_wakelock_release_fn)(uintptr_t)0xca620c5)(a0);
+}
+
+typedef uint8_t (*canopus_fw_mpu_region_allocate_fn)(void);
+static inline uint8_t canopus_fw_mpu_region_allocate(void) {
+    return ((canopus_fw_mpu_region_allocate_fn)(uintptr_t)0xc0c017d)();
+}
+
+typedef void (*canopus_fw_lv_obj_set_size_fn)(void *, int32_t, int32_t);
+static inline void canopus_fw_lv_obj_set_size(void * a0, int32_t a1, int32_t a2) {
+    return ((canopus_fw_lv_obj_set_size_fn)(uintptr_t)0x378739)(a0, a1, a2);
+}
+
+typedef void * (*canopus_fw_p65_calendar_localtime_fn)(uint32_t, uint32_t, void *);
+static inline void * canopus_fw_p65_calendar_localtime(uint32_t a0, uint32_t a1, void * a2) {
+    return ((canopus_fw_p65_calendar_localtime_fn)(uintptr_t)0xc761a2d)(a0, a1, a2);
+}
+
+typedef void (*canopus_fw_p65_bg_add_flag_fn)(void *, uint32_t);
+static inline void canopus_fw_p65_bg_add_flag(void * a0, uint32_t a1) {
+    return ((canopus_fw_p65_bg_add_flag_fn)(uintptr_t)0x387b99)(a0, a1);
+}
+
+typedef void (*canopus_fw_p67_blur_cache_clean_fn)(uint32_t, const void *);
+static inline void canopus_fw_p67_blur_cache_clean(uint32_t a0, const void * a1) {
+    return ((canopus_fw_p67_blur_cache_clean_fn)(uintptr_t)0xc72f02d)(a0, a1);
+}
+
+/* lv_obj_get_coords: skipped (argument type not mappable) */
+typedef int (*canopus_fw_lvx_notification_insert_message_fn)(const void *);
+static inline int canopus_fw_lvx_notification_insert_message(const void * a0) {
+    return ((canopus_fw_lvx_notification_insert_message_fn)(uintptr_t)0xca60099)(a0);
+}
+
+/* qjs_get_opaque: skipped (return type 'void *qjs_get_opaque' not mappable) */
+typedef int (*canopus_fw_p65_calendar_vg_dispatch_fn)(void *, void *);
+static inline int canopus_fw_p65_calendar_vg_dispatch(void * a0, void * a1) {
+    return ((canopus_fw_p65_calendar_vg_dispatch_fn)(uintptr_t)0xc7287f9)(a0, a1);
+}
+
+/* qjs_get_global_object: skipped (return type 'uint64_t qjs_get_global_object' not mappable) */
+typedef void (*canopus_fw_lv_obj_clear_flag_fn)(void *, uint32_t);
+static inline void canopus_fw_lv_obj_clear_flag(void * a0, uint32_t a1) {
+    return ((canopus_fw_lv_obj_clear_flag_fn)(uintptr_t)0x387c45)(a0, a1);
+}
+
+typedef int (*canopus_fw_p67_blur_gpu_finish_fn)(void);
+static inline int canopus_fw_p67_blur_gpu_finish(void) {
+    return ((canopus_fw_p67_blur_gpu_finish_fn)(uintptr_t)0xc8bc081)();
+}
+
+typedef int (*canopus_fw_launcher_page_insert_icon_fn)(void *);
+static inline int canopus_fw_launcher_page_insert_icon(void * a0) {
+    return ((canopus_fw_launcher_page_insert_icon_fn)(uintptr_t)0xc7f070d)(a0);
+}
+
+typedef int (*canopus_fw_app_launcher_add_fn)(uint16_t);
+static inline int canopus_fw_app_launcher_add(uint16_t a0) {
+    return ((canopus_fw_app_launcher_add_fn)(uintptr_t)0xc7ec451)(a0);
+}
+
+typedef int (*canopus_fw_rename_fn)(const char *, const char *);
+static inline int canopus_fw_rename(const char * a0, const char * a1) {
+    return ((canopus_fw_rename_fn)(uintptr_t)0x1c1587c9)(a0, a1);
+}
+
+typedef void * (*canopus_fw_lvx_page_msgbox_create_fn)(void *, void *);
+static inline void * canopus_fw_lvx_page_msgbox_create(void * a0, void * a1) {
+    return ((canopus_fw_lvx_page_msgbox_create_fn)(uintptr_t)0x1c12ae39)(a0, a1);
+}
+
+/* p65_bg_event_remove: skipped (argument type not mappable) */
+typedef int32_t (*canopus_fw_page_finish_fn)(void *);
+static inline int32_t canopus_fw_page_finish(void * a0) {
+    return ((canopus_fw_page_finish_fn)(uintptr_t)0x1c1325b9)(a0);
+}
+
+typedef int * (*canopus_fw_errno_location_fn)(void);
+static inline int * canopus_fw_errno_location(void) {
+    return ((canopus_fw_errno_location_fn)(uintptr_t)0xc4f793d)();
+}
+
+typedef void (*canopus_fw_lv_cache_release_fn)(uint32_t, void *, void *);
+static inline void canopus_fw_lv_cache_release(uint32_t a0, void * a1, void * a2) {
+    return ((canopus_fw_lv_cache_release_fn)(uintptr_t)0xc73b99d)(a0, a1, a2);
+}
+
+/* qjs_call: skipped (return type 'uint64_t qjs_call' not mappable) */
+typedef void (*canopus_fw_lvx_object_set_size_fn)(void *, int32_t, int32_t);
+static inline void canopus_fw_lvx_object_set_size(void * a0, int32_t a1, int32_t a2) {
+    return ((canopus_fw_lvx_object_set_size_fn)(uintptr_t)0xc255ce5)(a0, a1, a2);
+}
+
+typedef int (*canopus_fw_uv_async_send_fn)(void *);
+static inline int canopus_fw_uv_async_send(void * a0) {
+    return ((canopus_fw_uv_async_send_fn)(uintptr_t)0xc621ca1)(a0);
+}
+
+typedef void * (*canopus_fw_p65_bg_event_get_fn)(void *, uint32_t);
+static inline void * canopus_fw_p65_bg_event_get(void * a0, uint32_t a1) {
+    return ((canopus_fw_p65_bg_event_get_fn)(uintptr_t)0x3880d5)(a0, a1);
+}
+
+typedef int (*canopus_fw_mpu_region_configure_fn)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+static inline int canopus_fw_mpu_region_configure(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4) {
+    return ((canopus_fw_mpu_region_configure_fn)(uintptr_t)0xc9665e5)(a0, a1, a2, a3, a4);
+}
+
+typedef int32_t (*canopus_fw_bt_adapter_get_state_fn)(void *);
+static inline int32_t canopus_fw_bt_adapter_get_state(void * a0) {
+    return ((canopus_fw_bt_adapter_get_state_fn)(uintptr_t)0x1c008721)(a0);
+}
+
+/* Recovered global `font_reload_draw_unit_slot` at 0x3c450134. */
+#define canopus_fw_font_reload_draw_unit_slot ((void *)(uintptr_t)0x3c450134u)
+
+typedef void * (*canopus_fw_p65_calendar_label_create_fn)(void *);
+static inline void * canopus_fw_p65_calendar_label_create(void * a0) {
+    return ((canopus_fw_p65_calendar_label_create_fn)(uintptr_t)0xc78bcb5)(a0);
+}
+
+/* Recovered global `bt_l2cap_owner` at 0x3c492798. */
+#define canopus_fw_bt_l2cap_owner ((void *)(uintptr_t)0x3c492798u)
+
+typedef int (*canopus_fw_bt_adapter_enable_fn)(void *);
+static inline int canopus_fw_bt_adapter_enable(void * a0) {
+    return ((canopus_fw_bt_adapter_enable_fn)(uintptr_t)0x1c0086d1)(a0);
+}
+
+/* files_getfilep: skipped (return type 'struct file *' not mappable) */
+/* qjs_free_cstring: skipped (return type 'void qjs_free_cstring' not mappable) */
+typedef void * (*canopus_fw_p65_calendar_draw_buf_create_fn)(uint32_t, uint32_t, uint32_t, uint32_t);
+static inline void * canopus_fw_p65_calendar_draw_buf_create(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3) {
+    return ((canopus_fw_p65_calendar_draw_buf_create_fn)(uintptr_t)0xc719551)(a0, a1, a2, a3);
+}
+
+typedef int (*canopus_fw_rmdir_fn)(const char *);
+static inline int canopus_fw_rmdir(const char * a0) {
+    return ((canopus_fw_rmdir_fn)(uintptr_t)0x1c158b09)(a0);
+}
+
+typedef void (*canopus_fw_p65_bg_widget_scroll_fn)(void *);
+static inline void canopus_fw_p65_bg_widget_scroll(void * a0) {
+    return ((canopus_fw_p65_bg_widget_scroll_fn)(uintptr_t)0xc7dd919)(a0);
+}
+
+/* Recovered global `ferry_application_vtable` at 0x3c3275e0. */
+#define canopus_fw_ferry_application_vtable ((void *)(uintptr_t)0x3c3275e0u)
+
+/* qjs_free_value: skipped (return type 'void qjs_free_value' not mappable) */
+typedef void * (*canopus_fw_miwear_session_lookup_fn)(uint16_t);
+static inline void * canopus_fw_miwear_session_lookup(uint16_t a0) {
+    return ((canopus_fw_miwear_session_lookup_fn)(uintptr_t)0xca9c905)(a0);
+}
+
+typedef int32_t (*canopus_fw_lv_obj_get_scroll_x_fn)(void *);
+static inline int32_t canopus_fw_lv_obj_get_scroll_x(void * a0) {
+    return ((canopus_fw_lv_obj_get_scroll_x_fn)(uintptr_t)0x37b0d9)(a0);
+}
+
+typedef void (*canopus_fw_lv_obj_align_to_fn)(void *, void *, uint32_t, int32_t, int32_t);
+static inline void canopus_fw_lv_obj_align_to(void * a0, void * a1, uint32_t a2, int32_t a3, int32_t a4) {
+    return ((canopus_fw_lv_obj_align_to_fn)(uintptr_t)0x37a581)(a0, a1, a2, a3, a4);
+}
+
+typedef uint32_t (*canopus_fw_p67_blur_draw_buf_create_fn)(uint32_t, uint32_t, uint32_t, uint32_t);
+static inline uint32_t canopus_fw_p67_blur_draw_buf_create(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3) {
+    return ((canopus_fw_p67_blur_draw_buf_create_fn)(uintptr_t)0xc719551)(a0, a1, a2, a3);
+}
+
+typedef void * (*canopus_fw_lvx_list_item_create_fn)(void *);
+static inline void * canopus_fw_lvx_list_item_create(void * a0) {
+    return ((canopus_fw_lvx_list_item_create_fn)(uintptr_t)0x1c129639)(a0);
+}
+
+/* lv_obj_set_local_style_prop: skipped (argument type not mappable) */
+typedef void (*canopus_fw_p65_calendar_font_style_fn)(void *, const void *, uint32_t);
+static inline void canopus_fw_p65_calendar_font_style(void * a0, const void * a1, uint32_t a2) {
+    return ((canopus_fw_p65_calendar_font_style_fn)(uintptr_t)0x37f409)(a0, a1, a2);
+}
+
+typedef int (*canopus_fw_unlink_fn)(const char *);
+static inline int canopus_fw_unlink(const char * a0) {
+    return ((canopus_fw_unlink_fn)(uintptr_t)0x1c159825)(a0);
+}
+
+typedef uint16_t (*canopus_fw_lv_event_get_code_fn)(void *);
+static inline uint16_t canopus_fw_lv_event_get_code(void * a0) {
+    return ((canopus_fw_lv_event_get_code_fn)(uintptr_t)0xc73d8c1)(a0);
+}
+
+typedef int (*canopus_fw_p65_calendar_launcher_update_fn)(uint32_t);
+static inline int canopus_fw_p65_calendar_launcher_update(uint32_t a0) {
+    return ((canopus_fw_p65_calendar_launcher_update_fn)(uintptr_t)0xc7ec745)(a0);
+}
+
+typedef void * (*canopus_fw_lv_bar_create_fn)(void *);
+static inline void * canopus_fw_lv_bar_create(void * a0) {
+    return ((canopus_fw_lv_bar_create_fn)(uintptr_t)0xc784835)(a0);
+}
+
+typedef int (*canopus_fw_font_reload_count_cache_init_fn)(void *);
+static inline int canopus_fw_font_reload_count_cache_init(void * a0) {
+    return ((canopus_fw_font_reload_count_cache_init_fn)(uintptr_t)0xc73b5e9)(a0);
+}
+
+typedef int (*canopus_fw_p67_blur_snapshot_to_buffer_fn)(uint32_t, uint32_t, uint32_t);
+static inline int canopus_fw_p67_blur_snapshot_to_buffer(uint32_t a0, uint32_t a1, uint32_t a2) {
+    return ((canopus_fw_p67_blur_snapshot_to_buffer_fn)(uintptr_t)0xc7417c1)(a0, a1, a2);
+}
+
+typedef int32_t (*canopus_fw_write_fn)(int, const void *, uint32_t);
+static inline int32_t canopus_fw_write(int a0, const void * a1, uint32_t a2) {
+    return ((canopus_fw_write_fn)(uintptr_t)0x1c159a2d)(a0, a1, a2);
+}
+
+/* bt_queue_external: skipped (return type 'int bt_queue_external' not mappable) */
+typedef void (*canopus_fw_font_reload_lv_free_fn)(void *);
+static inline void canopus_fw_font_reload_lv_free(void * a0) {
+    return ((canopus_fw_font_reload_lv_free_fn)(uintptr_t)0xc741b49)(a0);
+}
+
+/* qjs_new_c_function2: skipped (return type 'uint64_t qjs_new_c_function2' not mappable) */
+typedef int (*canopus_fw_screen_get_state_fn)(void);
+static inline int canopus_fw_screen_get_state(void) {
+    return ((canopus_fw_screen_get_state_fn)(uintptr_t)0xca68fad)();
+}
+
+typedef int (*canopus_fw_bt_adapter_get_state_exact_fn)(void *);
+static inline int canopus_fw_bt_adapter_get_state_exact(void * a0) {
+    return ((canopus_fw_bt_adapter_get_state_exact_fn)(uintptr_t)0x1c008721)(a0);
+}
+
+/* app_install: skipped (argument type not mappable) */
+typedef void (*canopus_fw_p65_bg_image_descriptor_init_fn)(void *);
+static inline void canopus_fw_p65_bg_image_descriptor_init(void * a0) {
+    return ((canopus_fw_p65_bg_image_descriptor_init_fn)(uintptr_t)0xc719ec5)(a0);
+}
+
+typedef void (*canopus_fw_p65_calendar_buf_invalidate_fn)(void *, uint32_t, uint32_t, uint32_t);
+static inline void canopus_fw_p65_calendar_buf_invalidate(void * a0, uint32_t a1, uint32_t a2, uint32_t a3) {
+    return ((canopus_fw_p65_calendar_buf_invalidate_fn)(uintptr_t)0xc7191c5)(a0, a1, a2, a3);
+}
+
+typedef void (*canopus_fw_screen_session_stop_fn)(void *);
+static inline void canopus_fw_screen_session_stop(void * a0) {
+    return ((canopus_fw_screen_session_stop_fn)(uintptr_t)0xca68c6d)(a0);
+}
+
+typedef int (*canopus_fw_miwear_session_crypto_ctr_fn)(void *, int, uint16_t, const void *, void *);
+static inline int canopus_fw_miwear_session_crypto_ctr(void * a0, int a1, uint16_t a2, const void * a3, void * a4) {
+    return ((canopus_fw_miwear_session_crypto_ctr_fn)(uintptr_t)0xca99139)(a0, a1, a2, a3, a4);
+}
+
+/* Recovered global `font_reload_freetype_context_slot` at 0x3c450204. */
+#define canopus_fw_font_reload_freetype_context_slot ((void *)(uintptr_t)0x3c450204u)
+
+typedef int (*canopus_fw_p65_calendar_premultiply_fn)(void *);
+static inline int canopus_fw_p65_calendar_premultiply(void * a0) {
+    return ((canopus_fw_p65_calendar_premultiply_fn)(uintptr_t)0xc719b71)(a0);
+}
+
+typedef void (*canopus_fw_lv_obj_delete_fn)(void *);
+static inline void canopus_fw_lv_obj_delete(void * a0) {
+    return ((canopus_fw_lv_obj_delete_fn)(uintptr_t)0x37ff29)(a0);
+}
+
+typedef void * (*canopus_fw_p65_calendar_font_create_fn)(void *, const void *);
+static inline void * canopus_fw_p65_calendar_font_create(void * a0, const void * a1) {
+    return ((canopus_fw_p65_calendar_font_create_fn)(uintptr_t)0xc795db9)(a0, a1);
+}
+
+typedef void * (*canopus_fw_p65_calendar_font_resolve_fn)(const void *);
+static inline void * canopus_fw_p65_calendar_font_resolve(const void * a0) {
+    return ((canopus_fw_p65_calendar_font_resolve_fn)(uintptr_t)0xc8bcd41)(a0);
+}
+
+/* system_get_state: skipped (return type 'uint32_t *' not mappable) */
+typedef int (*canopus_fw_lv_image_decoder_get_info_fn)(const void *, void *);
+static inline int canopus_fw_lv_image_decoder_get_info(const void * a0, void * a1) {
+    return ((canopus_fw_lv_image_decoder_get_info_fn)(uintptr_t)0xc71d195)(a0, a1);
+}
+
+typedef void * (*canopus_fw_p65_bg_parent_fn)(void *);
+static inline void * canopus_fw_p65_bg_parent(void * a0) {
+    return ((canopus_fw_p65_bg_parent_fn)(uintptr_t)0x38001d)(a0);
+}
+
+/* nxsched_foreach: skipped (argument type not mappable) */
+/* file_close: skipped (argument type not mappable) */
+typedef int (*canopus_fw_power_battery_charging_fn)(void);
+static inline int canopus_fw_power_battery_charging(void) {
+    return ((canopus_fw_power_battery_charging_fn)(uintptr_t)0xca61d59)();
+}
+
+typedef void (*canopus_fw_p65_calendar_color_fn)(void *, uint32_t, uint32_t);
+static inline void canopus_fw_p65_calendar_color(void * a0, uint32_t a1, uint32_t a2) {
+    return ((canopus_fw_p65_calendar_color_fn)(uintptr_t)0x37f3c5)(a0, a1, a2);
+}
+
+typedef void (*canopus_fw_lv_obj_set_style_pad_bottom_fn)(void *, int32_t, uint32_t);
+static inline void canopus_fw_lv_obj_set_style_pad_bottom(void * a0, int32_t a1, uint32_t a2) {
+    return ((canopus_fw_lv_obj_set_style_pad_bottom_fn)(uintptr_t)0x37eed9)(a0, a1, a2);
+}
+
+typedef void (*canopus_fw_lv_obj_set_style_bg_opa_fn)(void *, uint32_t, uint32_t);
+static inline void canopus_fw_lv_obj_set_style_bg_opa(void * a0, uint32_t a1, uint32_t a2) {
+    return ((canopus_fw_lv_obj_set_style_bg_opa_fn)(uintptr_t)0xc0d8ff5)(a0, a1, a2);
+}
+
+typedef void * (*canopus_fw_bt_adapter_get_instance_fn)(void);
+static inline void * canopus_fw_bt_adapter_get_instance(void) {
+    return ((canopus_fw_bt_adapter_get_instance_fn)(uintptr_t)0xca3f475)();
+}
+
+typedef void * (*canopus_fw_opendir_fn)(const char *);
+static inline void * canopus_fw_opendir(const char * a0) {
+    return ((canopus_fw_opendir_fn)(uintptr_t)0xc4f7885)(a0);
+}
+
+typedef int (*canopus_fw_clock_gettime_fn)(uint32_t, stock_timespec_t *);
+static inline int canopus_fw_clock_gettime(uint32_t a0, stock_timespec_t * a1) {
+    return ((canopus_fw_clock_gettime_fn)(uintptr_t)0xc4c205d)(a0, a1);
+}
+
+typedef void (*canopus_fw_lv_bar_set_range_fn)(void *, int32_t, int32_t);
+static inline void canopus_fw_lv_bar_set_range(void * a0, int32_t a1, int32_t a2) {
+    return ((canopus_fw_lv_bar_set_range_fn)(uintptr_t)0xc7849e5)(a0, a1, a2);
+}
+
+typedef void * (*canopus_fw_lvx_page_title_create_fn)(void *, const char *, uint32_t, uint32_t, uint32_t);
+static inline void * canopus_fw_lvx_page_title_create(void * a0, const char * a1, uint32_t a2, uint32_t a3, uint32_t a4) {
+    return ((canopus_fw_lvx_page_title_create_fn)(uintptr_t)0xc21b2fd)(a0, a1, a2, a3, a4);
+}
+
+typedef int32_t (*canopus_fw_page_goto_fn)(uint32_t, uint32_t, uint32_t, uint32_t);
+static inline int32_t canopus_fw_page_goto(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3) {
+    return ((canopus_fw_page_goto_fn)(uintptr_t)0x1c132f4d)(a0, a1, a2, a3);
+}
+
+typedef void * (*canopus_fw_font_reload_cache_acquire_fn)(void *, const void *, void *);
+static inline void * canopus_fw_font_reload_cache_acquire(void * a0, const void * a1, void * a2) {
+    return ((canopus_fw_font_reload_cache_acquire_fn)(uintptr_t)0xc73b965)(a0, a1, a2);
+}
+
+/* qjs_to_cstring_len2: skipped (return type 'const char *qjs_to_cstring_len2' not mappable) */
+/* fs_getfilep: skipped (argument type not mappable) */
+typedef void * (*canopus_fw_lv_obj_add_event_cb_fn)(void *, void *, uint32_t, void *);
+static inline void * canopus_fw_lv_obj_add_event_cb(void * a0, void * a1, uint32_t a2, void * a3) {
+    return ((canopus_fw_lv_obj_add_event_cb_fn)(uintptr_t)0x388099)(a0, a1, a2, a3);
+}
+
+typedef void (*canopus_fw_lvx_msgbox_set_content_fn)(void *, uint32_t, const char *, const char *, const char *, const void *, uint32_t);
+static inline void canopus_fw_lvx_msgbox_set_content(void * a0, uint32_t a1, const char * a2, const char * a3, const char * a4, const void * a5, uint32_t a6) {
+    return ((canopus_fw_lvx_msgbox_set_content_fn)(uintptr_t)0x1c12ae91)(a0, a1, a2, a3, a4, a5, a6);
+}
+
+typedef void (*canopus_fw_p65_calendar_label_text_fn)(void *, const char *);
+static inline void canopus_fw_p65_calendar_label_text(void * a0, const char * a1) {
+    return ((canopus_fw_p65_calendar_label_text_fn)(uintptr_t)0xc78c879)(a0, a1);
+}
+
+/* qjs_add_module_export: skipped (return type 'int qjs_add_module_export' not mappable) */
+typedef void * (*canopus_fw_native_font_create_fn)(void *, const void *);
+static inline void * canopus_fw_native_font_create(void * a0, const void * a1) {
+    return ((canopus_fw_native_font_create_fn)(uintptr_t)0xc795db9)(a0, a1);
+}
+
+typedef int (*canopus_fw_p65_calendar_clock_fn)(uint32_t, void *);
+static inline int canopus_fw_p65_calendar_clock(uint32_t a0, void * a1) {
+    return ((canopus_fw_p65_calendar_clock_fn)(uintptr_t)0xc4c205d)(a0, a1);
+}
+
+typedef void (*canopus_fw_p65_calendar_image_source_fn)(void *, const void *);
+static inline void canopus_fw_p65_calendar_image_source(void * a0, const void * a1) {
+    return ((canopus_fw_p65_calendar_image_source_fn)(uintptr_t)0xc78acf1)(a0, a1);
+}
+
+typedef void (*canopus_fw_lv_obj_add_flag_fn)(void *, uint32_t);
+static inline void canopus_fw_lv_obj_add_flag(void * a0, uint32_t a1) {
+    return ((canopus_fw_lv_obj_add_flag_fn)(uintptr_t)0x387b99)(a0, a1);
+}
+
+/* qjs_get_array_buffer: skipped (return type 'uint8_t *qjs_get_array_buffer' not mappable) */
+typedef int32_t (*canopus_fw_lv_obj_get_scroll_y_fn)(void *);
+static inline int32_t canopus_fw_lv_obj_get_scroll_y(void * a0) {
+    return ((canopus_fw_lv_obj_get_scroll_y_fn)(uintptr_t)0x37b0ed)(a0);
+}
+
+typedef int (*canopus_fw_launcher_reset_order_info_fn)(void);
+static inline int canopus_fw_launcher_reset_order_info(void) {
+    return ((canopus_fw_launcher_reset_order_info_fn)(uintptr_t)0xc7ecafd)();
+}
+
+/* Recovered global `nuttx_current_task` at 0x201738f8. */
+#define canopus_fw_nuttx_current_task ((void *)(uintptr_t)0x201738f8u)
+
+/* property_get: skipped (argument type not mappable) */
+typedef void * (*canopus_fw_lv_img_create_fn)(void *);
+static inline void * canopus_fw_lv_img_create(void * a0) {
+    return ((canopus_fw_lv_img_create_fn)(uintptr_t)0xc78a961)(a0);
+}
+
+typedef int (*canopus_fw_p65_calendar_gpu_finish_fn)(void);
+static inline int canopus_fw_p65_calendar_gpu_finish(void) {
+    return ((canopus_fw_p65_calendar_gpu_finish_fn)(uintptr_t)0xc8bc081)();
+}
+
+typedef void (*canopus_fw_p65_calendar_align_fn)(void *, uint32_t, int32_t, int32_t);
+static inline void canopus_fw_p65_calendar_align(void * a0, uint32_t a1, int32_t a2, int32_t a3) {
+    return ((canopus_fw_p65_calendar_align_fn)(uintptr_t)0x378965)(a0, a1, a2, a3);
+}
+
+typedef void (*canopus_fw_p65_calendar_text_align_fn)(void *, uint32_t, uint32_t);
+static inline void canopus_fw_p65_calendar_text_align(void * a0, uint32_t a1, uint32_t a2) {
+    return ((canopus_fw_p65_calendar_text_align_fn)(uintptr_t)0x37f451)(a0, a1, a2);
+}
+
+/* uv_async_init: skipped (argument type not mappable) */
+typedef int (*canopus_fw_uv_mutex_init_fn)(void *);
+static inline int canopus_fw_uv_mutex_init(void * a0) {
+    return ((canopus_fw_uv_mutex_init_fn)(uintptr_t)0xc629281)(a0);
+}
+
+typedef void * (*canopus_fw_lv_event_get_user_data_fn)(void *);
+static inline void * canopus_fw_lv_event_get_user_data(void * a0) {
+    return ((canopus_fw_lv_event_get_user_data_fn)(uintptr_t)0xc73d8e5)(a0);
+}
+
+typedef int (*canopus_fw_p65_calendar_generate_fn)(void);
+static inline int canopus_fw_p65_calendar_generate(void) {
+    return ((canopus_fw_p65_calendar_generate_fn)(uintptr_t)0xc7efc8d)();
+}
+
+typedef void * (*canopus_fw_font_reload_cache_acquire_or_create_fn)(void *, const void *, void *);
+static inline void * canopus_fw_font_reload_cache_acquire_or_create(void * a0, const void * a1, void * a2) {
+    return ((canopus_fw_font_reload_cache_acquire_or_create_fn)(uintptr_t)0xc73ba2d)(a0, a1, a2);
+}
+
+typedef void (*canopus_fw_lv_obj_scroll_to_y_fn)(void *, int32_t, uint32_t);
+static inline void canopus_fw_lv_obj_scroll_to_y(void * a0, int32_t a1, uint32_t a2) {
+    return ((canopus_fw_lv_obj_scroll_to_y_fn)(uintptr_t)0x37c541)(a0, a1, a2);
+}
+
+/* Recovered global `ferry_framework_instance` at 0x3c492c60. */
+#define canopus_fw_ferry_framework_instance ((void *)(uintptr_t)0x3c492c60u)
+
+/* qjs_new_string_len: skipped (return type 'uint64_t qjs_new_string_len' not mappable) */
+typedef int (*canopus_fw_bt_queue_free_fn)(void *);
+static inline int canopus_fw_bt_queue_free(void * a0) {
+    return ((canopus_fw_bt_queue_free_fn)(uintptr_t)0xc66e06d)(a0);
+}
+
+typedef void (*canopus_fw_p65_calendar_object_delete_fn)(void *);
+static inline void canopus_fw_p65_calendar_object_delete(void * a0) {
+    return ((canopus_fw_p65_calendar_object_delete_fn)(uintptr_t)0x37ff29)(a0);
+}
+
+/* p65_bg_event_add: skipped (argument type not mappable) */
+typedef int (*canopus_fw_closedir_fn)(void *);
+static inline int canopus_fw_closedir(void * a0) {
+    return ((canopus_fw_closedir_fn)(uintptr_t)0xc4f78c1)(a0);
+}
+
+typedef void * (*canopus_fw_readdir_fn)(void *);
+static inline void * canopus_fw_readdir(void * a0) {
+    return ((canopus_fw_readdir_fn)(uintptr_t)0xc4f78ed)(a0);
+}
+
+typedef void * (*canopus_fw_lvgl_posix_open_fn)(void *, const char *, uint32_t);
+static inline void * canopus_fw_lvgl_posix_open(void * a0, const char * a1, uint32_t a2) {
+    return ((canopus_fw_lvgl_posix_open_fn)(uintptr_t)0xc7357d5)(a0, a1, a2);
+}
+
+/* file_write: skipped (return type 'ssize_t' not mappable) */
+typedef void * (*canopus_fw_lv_event_get_indev_fn)(void *);
+static inline void * canopus_fw_lv_event_get_indev(void * a0) {
+    return ((canopus_fw_lv_event_get_indev_fn)(uintptr_t)0x3881b9)(a0);
+}
+
+typedef void (*canopus_fw_mm_free_default_fn)(void *);
+static inline void canopus_fw_mm_free_default(void * a0) {
+    return ((canopus_fw_mm_free_default_fn)(uintptr_t)0xc50b25d)(a0);
+}
+
+typedef uint32_t (*canopus_fw_lv_tick_get_fn)(void);
+static inline uint32_t canopus_fw_lv_tick_get(void) {
+    return ((canopus_fw_lv_tick_get_fn)(uintptr_t)0xc7828d9)();
+}
+
+typedef void (*canopus_fw_p65_calendar_draw_buf_destroy_fn)(void *);
+static inline void canopus_fw_p65_calendar_draw_buf_destroy(void * a0) {
+    return ((canopus_fw_p65_calendar_draw_buf_destroy_fn)(uintptr_t)0xc719799)(a0);
+}
+
+typedef void (*canopus_fw_screen_session_restore_default_fn)(void *);
+static inline void canopus_fw_screen_session_restore_default(void * a0) {
+    return ((canopus_fw_screen_session_restore_default_fn)(uintptr_t)0xca68f39)(a0);
+}
+
+typedef int (*canopus_fw_font_reload_ft_set_pixel_size_fn)(void *, uint32_t, uint32_t);
+static inline int canopus_fw_font_reload_ft_set_pixel_size(void * a0, uint32_t a1, uint32_t a2) {
+    return ((canopus_fw_font_reload_ft_set_pixel_size_fn)(uintptr_t)0xc5666fd)(a0, a1, a2);
+}
+
+typedef void (*canopus_fw_p67_blur_cache_invalidate_fn)(uint32_t, uint32_t, uint32_t, uint32_t);
+static inline void canopus_fw_p67_blur_cache_invalidate(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3) {
+    return ((canopus_fw_p67_blur_cache_invalidate_fn)(uintptr_t)0xc72f021)(a0, a1, a2, a3);
+}
+
+typedef int (*canopus_fw_thirdparty_submit_message_content_fn)(const void *, uint32_t, uint32_t);
+static inline int canopus_fw_thirdparty_submit_message_content(const void * a0, uint32_t a1, uint32_t a2) {
+    return ((canopus_fw_thirdparty_submit_message_content_fn)(uintptr_t)0xca40065)(a0, a1, a2);
+}
+
+/* qjs_get_exception: skipped (return type 'uint64_t qjs_get_exception' not mappable) */
+typedef int (*canopus_fw_p65_calendar_image_info_fn)(const void *, void *);
+static inline int canopus_fw_p65_calendar_image_info(const void * a0, void * a1) {
+    return ((canopus_fw_p65_calendar_image_info_fn)(uintptr_t)0xc71d195)(a0, a1);
+}
+
+typedef int32_t (*canopus_fw_font_reload_ft_mul_fix_fn)(int32_t, int32_t);
+static inline int32_t canopus_fw_font_reload_ft_mul_fix(int32_t a0, int32_t a1) {
+    return ((canopus_fw_font_reload_ft_mul_fix_fn)(uintptr_t)0xc564819)(a0, a1);
+}
+
+typedef void (*canopus_fw_lv_bar_set_value_fn)(void *, int32_t, uint32_t);
+static inline void canopus_fw_lv_bar_set_value(void * a0, int32_t a1, uint32_t a2) {
+    return ((canopus_fw_lv_bar_set_value_fn)(uintptr_t)0xc784851)(a0, a1, a2);
+}
+
+/* scan_create: skipped (argument type not mappable) */
+/* file_dup3: skipped (argument type not mappable) */
+/* Recovered global `font_reload_style_refresh_enabled` at 0x3c450054. */
+#define canopus_fw_font_reload_style_refresh_enabled ((void *)(uintptr_t)0x3c450054u)
+
+typedef int (*canopus_fw_close_fn)(int);
+static inline int canopus_fw_close(int a0) {
+    return ((canopus_fw_close_fn)(uintptr_t)0x1c154d9d)(a0);
+}
+
+typedef void * (*canopus_fw_lv_label_create_fn)(void *);
+static inline void * canopus_fw_lv_label_create(void * a0) {
+    return ((canopus_fw_lv_label_create_fn)(uintptr_t)0xc78bcb5)(a0);
+}
+
+typedef void (*canopus_fw_screen_session_start_fn)(void *, int);
+static inline void canopus_fw_screen_session_start(void * a0, int a1) {
+    return ((canopus_fw_screen_session_start_fn)(uintptr_t)0xca68bd9)(a0, a1);
+}
+
+typedef int (*canopus_fw_watchface_manager_delete_watchface_fn)(const char *);
+static inline int canopus_fw_watchface_manager_delete_watchface(const char * a0) {
+    return ((canopus_fw_watchface_manager_delete_watchface_fn)(uintptr_t)0xca90b1d)(a0);
+}
+
+typedef int (*canopus_fw_mkdir_fn)(const char *, uint32_t);
+static inline int canopus_fw_mkdir(const char * a0, uint32_t a1) {
+    return ((canopus_fw_mkdir_fn)(uintptr_t)0x1c157c5d)(a0, a1);
+}
+
+typedef int32_t (*canopus_fw_read_fn)(int, void *, uint32_t);
+static inline int32_t canopus_fw_read(int a0, void * a1, uint32_t a2) {
+    return ((canopus_fw_read_fn)(uintptr_t)0x1c158721)(a0, a1, a2);
+}
+
+/* uv_close: skipped (argument type not mappable) */
+/* qjs_define_property_value_str: skipped (return type 'int qjs_define_property_value_str' not mappable) */
+typedef void (*canopus_fw_uv_mutex_unlock_fn)(void *);
+static inline void canopus_fw_uv_mutex_unlock(void * a0) {
+    return ((canopus_fw_uv_mutex_unlock_fn)(uintptr_t)0xc629379)(a0);
+}
+
+typedef void (*canopus_fw_screen_session_set_brightness_value_fn)(void *, int);
+static inline void canopus_fw_screen_session_set_brightness_value(void * a0, int a1) {
+    return ((canopus_fw_screen_session_set_brightness_value_fn)(uintptr_t)0xca68e8d)(a0, a1);
+}
+
+typedef void * (*canopus_fw_app_lookup_fn)(uint16_t);
+static inline void * canopus_fw_app_lookup(uint16_t a0) {
+    return ((canopus_fw_app_lookup_fn)(uintptr_t)0x1c151109)(a0);
+}
+
+typedef const char * (*canopus_fw_calendar_localized_text_fn)(const char *);
+static inline const char * canopus_fw_calendar_localized_text(const char * a0) {
+    return ((canopus_fw_calendar_localized_text_fn)(uintptr_t)0xc4f8459)(a0);
+}
+
+typedef int (*canopus_fw_power_battery_level_fn)(void);
+static inline int canopus_fw_power_battery_level(void) {
+    return ((canopus_fw_power_battery_level_fn)(uintptr_t)0xca61d71)();
+}
+
+typedef void (*canopus_fw_screen_session_set_auto_brightness_fn)(void *, int);
+static inline void canopus_fw_screen_session_set_auto_brightness(void * a0, int a1) {
+    return ((canopus_fw_screen_session_set_auto_brightness_fn)(uintptr_t)0xca68e29)(a0, a1);
+}
+
+/* qjs_get_typed_array_buffer: skipped (return type 'uint64_t qjs_get_typed_array_buffer' not mappable) */
+/* p65_bg_draw_image: skipped (argument type not mappable) */
+/* qjs_set_module_export: skipped (return type 'int qjs_set_module_export' not mappable) */
+typedef void (*canopus_fw_lvx_style_apply_fn)(void *, const void *, uint32_t, uint32_t);
+static inline void canopus_fw_lvx_style_apply(void * a0, const void * a1, uint32_t a2, uint32_t a3) {
+    return ((canopus_fw_lvx_style_apply_fn)(uintptr_t)0x1c12daa1)(a0, a1, a2, a3);
+}
+
+/* fs_putfilep: skipped (argument type not mappable) */
+typedef int (*canopus_fw_p65_calendar_sw_dispatch_fn)(void *, void *);
+static inline int canopus_fw_p65_calendar_sw_dispatch(void * a0, void * a1) {
+    return ((canopus_fw_p65_calendar_sw_dispatch_fn)(uintptr_t)0xc7222bd)(a0, a1);
+}
+
+typedef void (*canopus_fw_lvx_image_set_scale_fn)(void *, uint32_t, uint32_t);
+static inline void canopus_fw_lvx_image_set_scale(void * a0, uint32_t a1, uint32_t a2) {
+    return ((canopus_fw_lvx_image_set_scale_fn)(uintptr_t)0xc78a7fd)(a0, a1, a2);
+}
+
+typedef int (*canopus_fw_unregister_driver_fn)(const char *);
+static inline int canopus_fw_unregister_driver(const char * a0) {
+    return ((canopus_fw_unregister_driver_fn)(uintptr_t)0x1c15aa19)(a0);
+}
+
+typedef int (*canopus_fw_p65_bg_has_flag_fn)(void *, uint32_t);
+static inline int canopus_fw_p65_bg_has_flag(void * a0, uint32_t a1) {
+    return ((canopus_fw_p65_bg_has_flag_fn)(uintptr_t)0x387d4d)(a0, a1);
+}
+
+typedef void (*canopus_fw_lvx_object_delete_fn)(void *);
+static inline void canopus_fw_lvx_object_delete(void * a0) {
+    return ((canopus_fw_lvx_object_delete_fn)(uintptr_t)0xc8be459)(a0);
+}
+
+typedef void (*canopus_fw_native_font_wait_fn)(void *);
+static inline void canopus_fw_native_font_wait(void * a0) {
+    return ((canopus_fw_native_font_wait_fn)(uintptr_t)0xc72ef2d)(a0);
+}
+
+/* lv_timer_create: skipped (argument type not mappable) */
 /* ---- excluded symbols ----
- * app_install: restricted - not exported until context/ownership approved
- * app_launcher_add: restricted - not exported until context/ownership approved
  * app_launcher_data_init: restricted - not exported until context/ownership approved
- * app_launcher_del: restricted - not exported until context/ownership approved
- * app_lookup: restricted - not exported until context/ownership approved
  * app_net_connect_state_update: restricted - not exported until context/ownership approved
  * background_object_has_flag: restricted - not exported until context/ownership approved
  * background_object_hide: restricted - not exported until context/ownership approved
  * background_object_show: restricted - not exported until context/ownership approved
- * bt_adapter_get_instance: restricted - not exported until context/ownership approved
  * bt_adapter_get_scan_mode: restricted - not exported until context/ownership approved
- * bt_adapter_get_state: restricted - not exported until context/ownership approved
  * bt_adapter_register: restricted - not exported until context/ownership approved
  * bt_adapter_register_a2dp_callbacks: FORBIDDEN - no veneer may ever be generated
  * bt_adapter_register_hfp_ag_callbacks: FORBIDDEN - no veneer may ever be generated
@@ -65,17 +999,13 @@ static inline int canopus_identity_guard(void)
  * bt_free: restricted - not exported until context/ownership approved
  * bt_get_bond_state: restricted - not exported until context/ownership approved
  * bt_get_pairing_state: restricted - not exported until context/ownership approved
- * bt_l2cap_connect: restricted - not exported until context/ownership approved
  * bt_l2cap_disconnect: restricted - not exported until context/ownership approved
  * bt_l2cap_submit_cid: restricted - not exported until context/ownership approved
  * bt_pair_display_reply: restricted - not exported until context/ownership approved
  * bt_pair_request_reply: restricted - not exported until context/ownership approved
- * bt_queue_external: restricted - not exported until context/ownership approved
- * bt_queue_free: restricted - not exported until context/ownership approved
  * bt_remove_bond_private: restricted - not exported until context/ownership approved
  * bt_socket_server_receive: FORBIDDEN - no veneer may ever be generated
  * bt_timer_add: restricted - not exported until context/ownership approved
- * bt_timer_cancel: restricted - not exported until context/ownership approved
  * btsnoop_avdtp_recognizer: restricted - not exported until context/ownership approved
  * calendar_app_dispatch: restricted - not exported until context/ownership approved
  * calendar_app_lookup: restricted - not exported until context/ownership approved
@@ -86,13 +1016,9 @@ static inline int canopus_identity_guard(void)
  * calendar_eventbus_send: restricted - not exported until context/ownership approved
  * calendar_font_day: restricted - not exported until context/ownership approved
  * calendar_icon_notify: restricted - not exported until context/ownership approved
- * calendar_localized_text: restricted - not exported until context/ownership approved
  * calendar_localtime: restricted - not exported until context/ownership approved
  * calendar_snapshot: restricted - not exported until context/ownership approved
  * calendar_text_color: restricted - not exported until context/ownership approved
- * clock_gettime: restricted - not exported until context/ownership approved
- * close: restricted - not exported until context/ownership approved
- * closedir: restricted - not exported until context/ownership approved
  * control_center_scroll: restricted - not exported until context/ownership approved
  * controller_crash_dump: FORBIDDEN - no veneer may ever be generated
  * core_bt_pair_request_callback: restricted - not exported until context/ownership approved
@@ -102,52 +1028,20 @@ static inline int canopus_identity_guard(void)
  * driver_open_dispatch: restricted - not exported until context/ownership approved
  * driver_read_dispatch: restricted - not exported until context/ownership approved
  * driver_write_dispatch: restricted - not exported until context/ownership approved
- * errno_location: restricted - not exported until context/ownership approved
  * firmware_log: restricted - not exported until context/ownership approved
  * font_manager_add_path: restricted - not exported until context/ownership approved
  * font_manager_remove_path: restricted - not exported until context/ownership approved
- * font_reload_cache_acquire: restricted - not exported until context/ownership approved
- * font_reload_cache_acquire_or_create: restricted - not exported until context/ownership approved
- * font_reload_count_cache_init: restricted - not exported until context/ownership approved
- * font_reload_drop_face_id: restricted - not exported until context/ownership approved
- * font_reload_face_compare: restricted - not exported until context/ownership approved
- * font_reload_face_create: restricted - not exported until context/ownership approved
- * font_reload_face_destroy: restricted - not exported until context/ownership approved
- * font_reload_ft_mul_fix: restricted - not exported until context/ownership approved
- * font_reload_ft_set_pixel_size: restricted - not exported until context/ownership approved
- * font_reload_glyph_metrics: restricted - not exported until context/ownership approved
- * font_reload_glyph_pending_release: restricted - not exported until context/ownership approved
- * font_reload_gradient_pending_release: restricted - not exported until context/ownership approved
- * font_reload_image_pending_release: restricted - not exported until context/ownership approved
- * font_reload_list_remove: restricted - not exported until context/ownership approved
- * font_reload_lv_free: restricted - not exported until context/ownership approved
- * font_reload_lv_malloc: restricted - not exported until context/ownership approved
- * font_reload_metrics_compare: restricted - not exported until context/ownership approved
- * font_reload_metrics_create: restricted - not exported until context/ownership approved
- * font_reload_metrics_destroy: restricted - not exported until context/ownership approved
- * font_reload_outline_acquire: restricted - not exported until context/ownership approved
- * font_reload_outline_compare: restricted - not exported until context/ownership approved
- * font_reload_outline_create: restricted - not exported until context/ownership approved
- * font_reload_outline_destroy: restricted - not exported until context/ownership approved
- * font_reload_outline_event: restricted - not exported until context/ownership approved
- * font_reload_outline_release: restricted - not exported until context/ownership approved
- * font_reload_sw_dispatch: restricted - not exported until context/ownership approved
  * font_reload_vector_compare: restricted - not exported until context/ownership approved
  * font_reload_vector_destroy: restricted - not exported until context/ownership approved
  * font_reload_vector_drop: restricted - not exported until context/ownership approved
- * font_reload_vg_dispatch: restricted - not exported until context/ownership approved
- * fsync: restricted - not exported until context/ownership approved
  * gap_host_stock_receive: restricted - not exported until context/ownership approved
  * gethostbyname_r: restricted - not exported until context/ownership approved
- * heap_free: restricted - not exported until context/ownership approved
  * heap_mallinfo: restricted - not exported until context/ownership approved
- * heap_malloc: restricted - not exported until context/ownership approved
  * heap_zalloc: restricted - not exported until context/ownership approved
  * hfp_ag_connect: FORBIDDEN - no veneer may ever be generated
  * hfp_ag_disconnect: FORBIDDEN - no veneer may ever be generated
  * hidden_and_show_app_cb: restricted - not exported until context/ownership approved
  * insmod: restricted - not exported until context/ownership approved
- * interconnect_close: restricted - not exported until context/ownership approved
  * interconnect_connect: restricted - not exported until context/ownership approved
  * interconnect_send: restricted - not exported until context/ownership approved
  * ioctl: restricted - not exported until context/ownership approved
@@ -158,134 +1052,65 @@ static inline int canopus_identity_guard(void)
  * launcher_rect_init: restricted - not exported until context/ownership approved
  * launcher_scroll: restricted - not exported until context/ownership approved
  * launcher_scroll_prepare: restricted - not exported until context/ownership approved
- * lseek: restricted - not exported until context/ownership approved
- * lv_bar_create: restricted - not exported until context/ownership approved
- * lv_bar_set_range: restricted - not exported until context/ownership approved
- * lv_bar_set_value: restricted - not exported until context/ownership approved
- * lv_cache_drop: restricted - not exported until context/ownership approved
- * lv_cache_release: restricted - not exported until context/ownership approved
  * lv_display_get_horizontal_resolution: restricted - not exported until context/ownership approved
  * lv_display_get_vertical_resolution: restricted - not exported until context/ownership approved
  * lv_display_invalidate_area: restricted - not exported until context/ownership approved
- * lv_event_get_code: restricted - not exported until context/ownership approved
- * lv_event_get_indev: restricted - not exported until context/ownership approved
- * lv_event_get_user_data: restricted - not exported until context/ownership approved
  * lv_image_create: restricted - not exported until context/ownership approved
  * lv_image_create_xip_thunk: restricted - not exported until context/ownership approved
- * lv_image_decoder_get_info: restricted - not exported until context/ownership approved
  * lv_image_set_src: restricted - not exported until context/ownership approved
- * lv_indev_get_point: restricted - not exported until context/ownership approved
- * lv_obj_add_event_cb: restricted - not exported until context/ownership approved
- * lv_obj_align_to: restricted - not exported until context/ownership approved
- * lv_obj_clear_flag: restricted - not exported until context/ownership approved
- * lv_obj_get_coords: restricted - not exported until context/ownership approved
- * lv_obj_get_scroll_x: restricted - not exported until context/ownership approved
- * lv_obj_get_scroll_y: restricted - not exported until context/ownership approved
  * lv_obj_get_style_prop: restricted - not exported until context/ownership approved
  * lv_obj_move_to_index: restricted - not exported until context/ownership approved
  * lv_obj_refresh_style: restricted - not exported until context/ownership approved
  * lv_obj_remove_state: restricted - not exported until context/ownership approved
  * lv_obj_scroll_by: restricted - not exported until context/ownership approved
- * lv_obj_scroll_to: restricted - not exported until context/ownership approved
  * lv_obj_scroll_to_x: restricted - not exported until context/ownership approved
- * lv_obj_set_local_style_prop: restricted - not exported until context/ownership approved
  * lv_obj_set_local_style_prop_xip_thunk: restricted - not exported until context/ownership approved
  * lv_obj_set_scroll_dir: restricted - not exported until context/ownership approved
  * lv_obj_set_scroll_snap_x: restricted - not exported until context/ownership approved
  * lv_obj_set_scroll_snap_y: restricted - not exported until context/ownership approved
  * lv_obj_set_scrollbar_mode: restricted - not exported until context/ownership approved
- * lv_obj_set_style_bg_opa: restricted - not exported until context/ownership approved
  * lv_obj_set_style_bg_opa_xip_thunk: restricted - not exported until context/ownership approved
  * lv_obj_tree_walk: restricted - not exported until context/ownership approved
- * lv_obj_update_layout: restricted - not exported until context/ownership approved
- * lv_tick_get: restricted - not exported until context/ownership approved
- * lv_timer_create: restricted - not exported until context/ownership approved
  * lv_timer_del: restricted - not exported until context/ownership approved
- * lvgl_posix_open: restricted - not exported until context/ownership approved
  * lvx_content_pad_bottom: restricted - not exported until context/ownership approved
- * lvx_image_set_scale: restricted - not exported until context/ownership approved
  * lvx_label_create: restricted - not exported until context/ownership approved
  * lvx_label_set_long_mode: restricted - not exported until context/ownership approved
  * lvx_label_set_text: restricted - not exported until context/ownership approved
- * lvx_list_item_update: restricted - not exported until context/ownership approved
  * lvx_list_row_create: restricted - not exported until context/ownership approved
  * lvx_list_row_trailing: restricted - not exported until context/ownership approved
  * lvx_msgbox_create: restricted - not exported until context/ownership approved
- * lvx_msgbox_set_content: restricted - not exported until context/ownership approved
- * lvx_notification_insert_message: restricted - not exported until context/ownership approved
- * lvx_object_add_flag: restricted - not exported until context/ownership approved
- * lvx_object_align: restricted - not exported until context/ownership approved
- * lvx_object_delete: restricted - not exported until context/ownership approved
- * lvx_object_set_size: restricted - not exported until context/ownership approved
- * lvx_page_content_create: restricted - not exported until context/ownership approved
- * lvx_page_title_create: restricted - not exported until context/ownership approved
- * lvx_style_apply: restricted - not exported until context/ownership approved
- * miwear_session_crypto_ctr: restricted - not exported until context/ownership approved
- * miwear_session_lookup: restricted - not exported until context/ownership approved
  * miwear_transport_l2_rx: restricted - not exported until context/ownership approved
  * miwear_transport_send: restricted - not exported until context/ownership approved
- * mkdir: restricted - not exported until context/ownership approved
  * modhandle: restricted - not exported until context/ownership approved
- * native_font_create: restricted - not exported until context/ownership approved
- * native_font_release: restricted - not exported until context/ownership approved
- * native_font_wait: restricted - not exported until context/ownership approved
  * net_lock: restricted - not exported until context/ownership approved
  * net_unlock: restricted - not exported until context/ownership approved
  * netdev_input: restricted - not exported until context/ownership approved
  * netdev_register: restricted - not exported until context/ownership approved
  * notifications_scroll: restricted - not exported until context/ownership approved
  * offload_property_apply: FORBIDDEN - no veneer may ever be generated
- * open: restricted - not exported until context/ownership approved
- * opendir: restricted - not exported until context/ownership approved
  * p67_battery_child_count: restricted - not exported until context/ownership approved
  * p67_battery_child_get: restricted - not exported until context/ownership approved
  * p67_battery_extra_draw_size: restricted - not exported until context/ownership approved
  * p67_battery_image_draw: restricted - not exported until context/ownership approved
  * p67_battery_image_dsc_init: restricted - not exported until context/ownership approved
  * p67_battery_native_event: restricted - not exported until context/ownership approved
- * p67_blur_cache_clean: restricted - not exported until context/ownership approved
- * p67_blur_cache_invalidate: restricted - not exported until context/ownership approved
  * p67_blur_crossview_callback: restricted - not exported until context/ownership approved
- * p67_blur_draw_buf_create: restricted - not exported until context/ownership approved
- * p67_blur_draw_buf_destroy: restricted - not exported until context/ownership approved
  * p67_blur_event_list_add: restricted - not exported until context/ownership approved
  * p67_blur_event_list_count: restricted - not exported until context/ownership approved
  * p67_blur_event_list_get: restricted - not exported until context/ownership approved
  * p67_blur_event_list_remove: restricted - not exported until context/ownership approved
- * p67_blur_gpu_finish: restricted - not exported until context/ownership approved
  * p67_blur_pm_relax: restricted - not exported until context/ownership approved
  * p67_blur_pm_stay: restricted - not exported until context/ownership approved
- * p67_blur_snapshot_to_buffer: restricted - not exported until context/ownership approved
  * p67_blur_style_get: restricted - not exported until context/ownership approved
- * page_finish: restricted - not exported until context/ownership approved
- * page_goto: restricted - not exported until context/ownership approved
  * page_navigator_open_page: FORBIDDEN - no veneer may ever be generated
  * poll_notify: restricted - not exported until context/ownership approved
- * power_battery_charging: restricted - not exported until context/ownership approved
- * power_battery_level: restricted - not exported until context/ownership approved
- * power_battery_ready: restricted - not exported until context/ownership approved
- * property_get: restricted - not exported until context/ownership approved
- * property_get_int32: restricted - not exported until context/ownership approved
  * protobuf_set_ordered_app_list: restricted - not exported until context/ownership approved
  * pthread_create_internal: FORBIDDEN - no veneer may ever be generated
  * public_work_queue: FORBIDDEN - no veneer may ever be generated
  * quickapp_register_app: restricted - not exported until context/ownership approved
- * read: restricted - not exported until context/ownership approved
- * readdir: restricted - not exported until context/ownership approved
  * recvfrom: restricted - not exported until context/ownership approved
  * register_blockdriver: restricted - not exported until context/ownership approved
- * register_driver: restricted - not exported until context/ownership approved
- * rename: restricted - not exported until context/ownership approved
- * rmdir: restricted - not exported until context/ownership approved
  * rmmod: restricted - not exported until context/ownership approved
- * screen_get_state: restricted - not exported until context/ownership approved
- * screen_session_create: restricted - not exported until context/ownership approved
- * screen_session_restore_default: restricted - not exported until context/ownership approved
- * screen_session_set_auto_brightness: restricted - not exported until context/ownership approved
- * screen_session_set_brightness_value: restricted - not exported until context/ownership approved
- * screen_session_start: restricted - not exported until context/ownership approved
- * screen_session_stop: restricted - not exported until context/ownership approved
- * screen_turn_on: restricted - not exported until context/ownership approved
  * sdp_builder_create: restricted - not exported until context/ownership approved
  * sdp_commit: restricted - not exported until context/ownership approved
  * sdp_set_raw_attribute: restricted - not exported until context/ownership approved
@@ -304,23 +1129,14 @@ static inline int canopus_identity_guard(void)
  * sport_titlebar_dispatch: FORBIDDEN - no veneer may ever be generated
  * sport_titlebar_lifecycle_reset: FORBIDDEN - no veneer may ever be generated
  * stat: restricted - not exported until context/ownership approved
- * system_get_state: restricted - not exported until context/ownership approved
  * system_router_app_wrapper: FORBIDDEN - no veneer may ever be generated
  * system_router_get_pages_wrapper: FORBIDDEN - no veneer may ever be generated
  * system_router_page_record_wrapper: FORBIDDEN - no veneer may ever be generated
- * thirdparty_submit_message_content: restricted - not exported until context/ownership approved
- * unlink: restricted - not exported until context/ownership approved
  * unregister_blockdriver: restricted - not exported until context/ownership approved
- * unregister_driver: restricted - not exported until context/ownership approved
  * vendor_hci_transport_register: FORBIDDEN - no veneer may ever be generated
  * vibrator_hal_transact: restricted - not exported until context/ownership approved
- * wakelock_acquire: restricted - not exported until context/ownership approved
- * wakelock_create: restricted - not exported until context/ownership approved
- * wakelock_release: restricted - not exported until context/ownership approved
- * watchface_manager_delete_watchface: restricted - not exported until context/ownership approved
  * watchface_reset_watchface: restricted - not exported until context/ownership approved
  * widgets_scroll: restricted - not exported until context/ownership approved
- * write: restricted - not exported until context/ownership approved
  */
 
 

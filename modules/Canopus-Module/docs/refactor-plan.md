@@ -6,6 +6,54 @@
 
 状态标记：`[ ]` 未开始　`[~]` 进行中　`[x]` 完成（附证据/commit）　`[!]` 阻塞（写明原因）
 
+## 新设备体验对齐（2026-11-03）
+
+目标：Band 9 3.1.32（n66）、Band 9 Pro 3.1.190（n67）、Band 10 3.1.28（o66）、REDMI Watch 6 3.100.043（p65）的模块体验与 Band 10 Pro / Band 11 一致。以下全部是 host / emulator 证据，不提升任何符号批准、真机或生产状态。
+
+- [x] 模块加载：C 模块每个函数约 4 个 section（services_test 310 个），定长 loader scratch 放不下；改为按 ELF 头的 section 数分配（`canopus_elf32_section_count`），host harness 与 CI gate 4 用真实 services_test 走 loader。verifier 不再把 `SHF_MERGE|SHF_STRINGS` 段当成重定位目标（**CLI 改动，需要发版**）。
+- [x] v8 镜像在 Umem（特权默认 map 可执行），不再申请 MPU lease；p65 任务是非特权的，text+ro 改为 RW+X 两段，内联 hook 才能改写。
+- [x] 安装器表盘与 `module-installer-prod` 统一读满 88 字节 CQD1（`device_error()` 偏移 +24），CI gate 7 的 Lua fixture 同步。
+- [x] RESTORE_AFTER_BOOT 报 `-6` 的误报：`sup_verify_kind` 成功时清零 `error_code`，把同一轮里前一个槽位的失败抹掉；改为只在失败时写。
+- [x] 旧 SDK 构建的 UI 模块（`page_count` 之前的 28 字节 entry、`on_resume` 之前的前缀）`set_entry` 返回 `-22`；现在两种旧前缀都按单页/无过渡接受（所有 target）。
+- [x] v8 通知：`lvx_notification_insert_message`（n66 `0x0C4F9871`、n67 `0x0C4F1F29`、o66 `0x0C52DAD1`，`EVID-NOTIFY-9132/9190/1028-001`），88 字节消息结构，n66 的 start_reminder 在 +0x4c、n67/o66 在 +0x50。生成器新增 `FW_9_NOTIFY`（仅无 native header 的 staged 家族，p65 由 band11 header 提供）。模块安装通知与 `ctx->notify` 在三台 v8 上可用。
+- [x] 平台硬件服务（亮度、熄屏、电池、wakelock、属性、system_state）补到 n67/o66/p65（`EVID-PLATFORM-HW-*`）；all-services-test 的设备表补齐四款型号与分辨率。
+- [x] n67/o66 owner pump（熄屏后仍跑的 libuv 定时器，`evidence/owner-pump.json`，第二轮并入 `l2-sram-probe.json`）：`miwear_main` 的 UI loop（n67 `0x200C8D8C`、o66 `0x200A2B80`）与 88 字节 `uv_timer_t`。有了它，开机稳定性提交、后台定时器与 TIME v2 不再依赖亮屏。Mirage 上熄屏状态下两次开机都提交了稳定（boot word 0、starts 0）；之前 n67 的 `booting` 一直不清，starts 跨开机累加。n66 已由 L2 证据提供。
+- 模拟器（Mirage）：n66 26/27、n67 25/27、o66 25/27（跳过项：Haptics 仅预设；n67/o66 无 L2 所以 Connect 跳过），KV 跨重启通过，`--ui` 新模块装 → 启 → 激活为 ACTIVE。前一轮 n66/n67 的反复复位是测试 harness 在表盘脚本加载期间执行 OPEN_MANAGER 造成的（推 Manager 页销毁了正在创建的表盘页），改成延后一拍后两次开机无复位。
+- [x] 第二轮（同日，`v8-manager-bringup.md` 第 35 轮）：
+  - n67/o66/p65 的加密 L2 后端（CanopusConnect）：`owner-pump.json` 并入 `l2-sram-probe.json`，补 RX/SEND/SESSION/CRYPTO/CONNECTIONS 与 BT_LOOP（SPP pty 读回调所在的 loop）。
+  - p65 owner pump（`miwear_main` 的 UI loop `0x3C479C68`，152 字节 `uv_timer_t`）；p65 `lv_timer_del` 记录指错，更正为 `0x0C74154C`。p65 常驻上限 184,320 → 192,512（与 Band 11 相同），L2 后实测 186,830。
+  - n67 电池：固件没有 getter，Supervisor 直接读 PowerManager 的 {充电字节, 电量字} `0x200BD30C`，前面由 `power_battery_ready` 把关（`CANOPUS_SUP_PM_BATTERY_STATE`）。
+  - Band 11 真机固化写坏闪存、循环重启（用户反馈）：`.139/.155/.179` 的 `boot-persistence.json` 记 `device: failed`，生成器对这种记录输出 `CANOPUS_BOOT_ENABLED 0`。
+  - 同日修写入器（`v8-manager-bringup.md` 第 36 轮，ADR-CAN-012“写入”）：经固件 flash HAL 在一个 BASEPRI 临界区里擦写整块，探测、整块 CRC、只清位的解除固化、读回重试与回退、电量门槛、`pin.log`。
+    `.043` 换用新写入器；Band 11 仅 `CANOPUS_BOOT_DEVICE_TEST=1` 构建打开，待真机复测。
+  - 开机路径的第二个问题：固件 `lua` 退出后它的状态仍留在 `luaopen_screen` 的三格表里，下一次亮灭屏在已释放内存上跑 Lua（Mirage `.155` 复位，`.043` 也有残留）。
+    生成的 `boot.lua` 先清掉自己那一格（新符号 `lua.screen_lua_states`，restricted / not_probed）。
+  - 模拟器（Mirage）：n67、o66 都是 26/27（只跳过 Haptics），Connect「listen, send & remote listening」通过；各开机两次、每次 150 秒，没有新增 minidump，稳定性提交（booting 0、starts 0），KV 跨重启通过。n67 用 QMP 读 PowerManager 全局：就绪字节 1/1、充电 1、电量 63，与 `miragectl battery 63 --charging` 一致。
+- 仍有差距：
+  - 四台都没有固化启动（Band 11 的写入器换过之后还没有真机复测；`.043` 开着，没有真机证据）。
+  - Haptics 只有预设：固件只能按编号播放预设振动，任意时长要直接驱动振动器 ioctl，模拟器上无法验证，没有做。
+  - p65 的 Mirage 设备不可用，p65 只有静态证据 + 构建 + verifier。
+  - 没有任何真机证据，真机清单见 `v8-manager-bringup.md`。
+
+## P65 恢复模块时循环复位修复（2026-11-02）
+
+- [x] 用故障前 Corona 仍启用的注册表复现，GDB 捕获 MemManage `IACCVIOL`：模块构造器 `0x3d56b98a` 同时落在 Supervisor 与模块 RX 的 MPU 区域中。根因是 stage2 只申请 175,134 B，却建立 262,144 B 映射，后续模块占用映射尾部；ARMv8-M 拒绝重叠区域。证据 `EVID-EMU-65043-006`。
+- [x] stage2 预留完整 MPU 窗口，保持 ELF 逻辑大小、模块 RX/RW 权限及释放路径不变；仅现有 `image_mpu_lease` 配置生效。P65 bootstrap 构建与 Supervisor verifier 通过；两次独立冷启动均恢复原始启用状态、Run 后连续触摸 30 轮，无复位，MPU 回读均无重叠，未靠自动停用模块避开故障。
+- Corona 仍返回缺失服务 `-38`，安装器显示恢复失败 `result=6 / error=-20`；不算 Corona 激活成功。修复需更新安装器内 stage2，只替换 Supervisor ELF 不足。以上仅 emulator 证据，不提升符号批准、真机或生产状态。
+
+## Windows 开发环境接入（2026-11-01）
+
+- [x] 原生 Windows Mirage CLI、GUI、QEMU、AstroBox Bridge 与 Facetory 构建通过；Canopus 构建接入 WSL2，入口与兼容补丁在 `scripts/emu/`。
+- [x] .043 启动、表盘、NSH、正常退出与 NOR 写回通过；修复 QEMU shutdown notifier 取址、QUERY_DEVICE 缓冲区、Windows 双击时序与 Swift 运行库选择。证据 `.local/mirage/cli-retest.json`。
+- [x] Canopus `af4f9b30` 重建并通过生产安装器 → 加密 CPC2 投递 → 冷启动后重新 Run → ACTIVE 与探针检查；页面返回 12 项、timer pump 3 项 host 回归通过。证据 `.local/mirage/runs/af4f9b30-companion/run.json`、`.local/mirage/host-af4f9b30-tests.log`。
+- [x] 便携 GUI 配对、触摸与文件选择安装模块通过；重新 Run 后两个模块均 ACTIVE。证据 `.local/mirage/gui-review-20261101.json`、`.local/mirage/portable-recovered/run.json`。
+- [x] 修复 WinUI 菜单复用与导入结果提示冲突导致的闪退；固件窗口操作、q65 原 ZIP 导入与创建设备、启动至操作引导通过，便携 EXE/ZIP 已更新。证据 `.local/mirage/archive-menu-verification.json`、`.local/mirage/firmware-import-verification.json`。
+- [x] WSL2 / Ubuntu 24.04、Swift 6.3 对照验证：MirageKit 测试、含依赖补丁的 GTK GUI/CLI/QEMU 构建、GUI 启动及独立 .043 开关机链路通过；Canopus check/doctor 通过。macOS 仅静态分支与语法检查通过，未做 Xcode 构建。证据 `.local/mirage/unix-verification.json`。
+- [~] 严格 UI 探针比对仍有重复 `open`，companion 部分启动有 Tokio panic，GUI/CLI 交替重启有 `runtime.json` 清理竞争；验证范围与证据见 `windows-mirage.md`，不记为全量通过。
+
+环境、命令、验证记录见 [`windows-mirage.md`](windows-mirage.md)。以上仅 host/emulator 证据，
+模块恢复依赖重新加载 Supervisor，不代表开机固化、真机验证或 production approval。
+
 ## 1. 背景与痛点（2026-10-14 已核查）
 
 开发体验：
@@ -77,6 +125,21 @@
 | K20 | 固化启动取代页面延时 Auto-run（ADR-CAN-012）：默认不固化，AstroBox Canopus 页确认后 Supervisor 经 `/dev/bes_flash` 改写 `rc.sysinit` 的一段等长差异尾段，覆盖 Band 10 Pro `.043` 与 Band 11 `.155` / `.179`（Mirage 冷启动验证，无真机）；安全模式与自动停用/回退对用户可见（管理器、启动通知、AstroBox）；修复退出安全模式不清崩溃计数；Band 10 构建去掉 `.ARM.exidx`；线程/工作队列的评估结论见 progress.md | 2026-10-21 |
 | K17 | 放弃 Band 11 `4.100.177`（缺固件镜像、适配不完整），整体移除其 target、Rust 绑定、测试与脚本；Band 11 改为适配 `4.100.179`（q66tc 完整包）。177 上的授权清单（calendar alpha 等）随目录删除，179 须重新取得用户授权，不继承；历史行与证据出处文字保留，可由 git 历史找回 | 2026-10-20 |
 | K21 | 快速静态适配四款 Mirage 支持的固件：Xiaomi Band 9 `3.1.32`（n66）、Band 9 Pro `3.1.190`（n67cn）、Band 10 `3.1.28`（o66tc）、REDMI Watch 6 `3.100.043`（p65）。Band 9 由 tag `band9-frozen` 恢复且全部批准降为 restricted/PENDING；n67 由 3.1.175 包移植（108/123 STATIC_RECOVERED），o66 由 Band 9 包移植（47/142），p65 由 Band 10 Pro `.043` 包移植。四者都标注为 Band-11 风格 Lua-owned staged loader（无 insmod、无 Lua `os.execute` 恢复），但 stage1/stage2、installer、模拟器与真机验证均未实现；n66/n67/o66 为 LVGL v8，需要专门的 v8 UI 后端，p65 为 v9。只新增静态记录，不提升任何能力状态 | 2026-10-24 |
+| K22 | Band 9 / Band 9 Pro 从静态包推进到可构建链路（2026-10-25，构建/模拟器级）：新增显式 `static_test_abi`（restricted STATIC_RECOVERED 只生成地址常量，生成头标注 `CANOPUS_SUP_STATIC_TEST_ABI`，不是批准）；恢复 LVGL v8 Manager 后端、Band 9 的 Kmem/MPU stage1/stage2、loader 配置生成器与 CPC2 安装器。`.32` Supervisor 112,876 B、`.190` 112,976 B，verifier PASS；stage 资源分别 417/3,524 与 421/3,544 B。Mirage 必须导入完整固件包；完整 n66 包内 AP SHA 与 target 相同。o66/p65 仍只有静态包 | 2026-10-25 |
+| K23 | Band 9 `3.1.32` Mirage 端到端通过（2026-10-25，仅 emulator 证据）：安装器表盘用打了 `facetory-lua-layer.patch` 的 Facetory、protocol `0x0800` 打包后，n66 引擎执行 `main.lua`；Run 完成 stage0 → stage1 → stage2 → Supervisor → `/dev/canopus` 注册 → CPC2 INSTALL 0/2、RESTORE_AFTER_BOOT、INSTALL 1/2（全部 result 5），registry 写入 `CDR1`。修复：字符驱动注册改为 type-1 `0xc4f7c40`（原 type-7 记录导致 open ENOSYS）；cave 移到 `0x200D0000`；149,866 B Supervisor 镜像从 Kmem 改为 Umem + 默认 map 执行；v8 identity guard 接受 LF。证据 `EVID-EMU-9132-001` / `EVID-ABI-9132-REGISTER-001`。真机验证仍 pending | 2026-10-25 |
+| K24 | Band 9 Pro `.190` / Band 10 o66 `.28` 构建推进（2026-10-25）：两者 Supervisor 均 verifier PASS（112,960 / 112,936 B），stage 资源已 staging，字符驱动注册分别改为 type-1 `0xc4f03f0` / `0xc5281d0`；o66 的 Umem 默认分配对从精确 mm 模块恢复 `0xc12234c`/`0xc11eee8`，28 条 v8/平台记录以 static-test 证据接受（LVGL creator 仍未消歧）。Mirage：`.190` 进入 stage0 后在 `system` 任务 usage fault（栈溢出），尚未注册 Supervisor；o66 安装器可渲染但该固件 Lua 表盘不派发按钮触摸，已加默认关闭的 `AUTORUN` 诊断钩子，autorun 运行待完成。p65 仍只有静态包 | 2026-10-25 |
+| K25 | Band 9 Pro `3.1.190` Mirage 端到端通过（2026-10-25，仅 emulator 证据）：安装器 Run 完成 cave stage0 → stage1 → stage2 → Supervisor → `/dev/canopus` 注册 → CPC2 INSTALL 0/2、RESTORE_AFTER_BOOT、INSTALL 1/2（全部 result 5），显示 `Run completed`；`registry.bin` = `CDR1`，`install_info_v1.db` 含 `com.canopus.manager`。修复四类缺陷：(1) src-9pro-3175 移植的 open/close/read/write/unlink/unregister_driver/page_goto/page_finish/app_lookup/LVGL 记录地址指错函数，按 3.1.32 重新匹配并逐条反编译核对（`EVID-PORT-9190-CORRECT`）；(2) `kmem_malloc` 必须是 kmm 描述符 `0x200b0840` 的包装 `0xc0f11f4`，原先的 `0xc0f1170` 是 Umem 描述符；(3) cave trampoline 的 `blx` 覆盖 LR 后 `bx lr` 原地循环，改为保存/恢复 LR；(4) 3.1.190 的 `launcher_load_app_info` 在 +0x1c 读回调、app_install 复制 0x3c 字节，v8 后端新增 `CANOPUS_MGR_APPINFO_190` 布局，否则调用空 `page_registry`。另：profile 固定 `entry_mode = "cave"`（mailbox 的 exec_handler+0x45 在 3.1.190 不是指令边界）。证据 `EVID-EMU-9190-001`；真机仍 pending | 2026-10-25 |
+| K26 | Band 10 o66 `3.1.28` Mirage 端到端通过（2026-10-25，仅 emulator 证据）：AUTORUN 完成 cave stage0 → stage1 → stage2 → Supervisor → `/dev/canopus` → CPC2 全部 result 5（`Run completed`），`registry.bin` = `CDR1`；QMP 读 Supervisor target record：magic `0x434e5431`、identity/app_install/launcher_add 均 0，Manager 应用与 launcher 入口已安装。修复：`app_install` 记录由文本排版函数改为 `0xc4737e8`、`unregister_driver` 改为 `0xc3938c0`（`EVID-PORT-1028-CORRECT`）；v8 app 描述符新增 3.1.28 布局（回调 +0x1c、hidden +0x3c、0x40 字节，`CANOPUS_MGR_APPINFO_1028`）；cave trampoline 保存/恢复 LR；profile 固定 `entry_mode = "cave"`。遗留：该固件 Lua 表盘不派发按钮触摸（本次用 AUTORUN），Manager 页面尚未在设备上打开。LVGL v8 object creator 已于 2026-10-25 消歧：`lv_obj_create` = `0xc2bc5b8`（`lv_obj_class` `0x2c686a74`；`create_obj` `0xc2b9734` + `init_obj` `0xc2bc534`），原记录 `0xc127924` 是字符串拷贝辅助函数（`EVID-STATIC-1028-V8-001`）。证据 `EVID-EMU-1028-001`；真机仍 pending | 2026-10-25 |
+| K27 | LVGL v8 Manager 页面在 o66/n66/n67 上可用性推进（2026-10-25，仅 emulator 证据）：o66 概览页与「模块」子页面在 Mirage 上完整可用——行点击派发、`page_goto` 压栈进入 page 1、子页面标题与分节正常绘制；n66/n67 页能创建但内容缺失，原因分别是 3.1.32 的 `lvx_page_title_create` 不返回（改画普通标题）与 3.1.190 的该函数多一个 user-data 参数（补第 5 个参数）。修复要点：事件码是 `event+8` 的**字节**而不是 32 位字（原读法把 CLICKED 读成 `0x3c350007`，所有点击被丢弃）；行内文字对齐要抵消容器 22 px 水平内边距；`page_goto` 是压栈、源页不销毁，路由改回点击回调内直接推页，删掉整套 lv_timer 延后逻辑（o66 的 `lv_timer_create` 记录实为跳进未映射区的 thunk）；值按显示列宽截断（CJK 记 2 列）。o66 现已全流程可用（概览→模块子页面→返回手势→概览），关键修复是 `on_destroy` 不再在页面过渡里关闭设备会话——之前返回手势会让整机复位。n66 仍未进到页面内容：对页面容器建子对象时固件不返回（打点 T0 之后无 T2/T3）并重启。launcher 条目仍依赖 launcher UI 已建立，尚未在三条固件上确认出现。全部为 emulator 证据，不提升任何能力状态 | 2026-10-25 |
+| K28 | o66「输入到不了页面」的结论更正，并修好确认框一点就消失（2026-10-28，仅 emulator 证据）：旧驱动在 o66（212×520）上沿用 n66 的 y≈392 点「模块」，那里是「管理」分节标题，y 380–400 的扫描也没有可导航行，第 31 轮补记 2/3/5 的排除清单因此作废；对象树（sys/top 层无可点击覆盖物、`disp->prev_scr` = 0、indev 未禁用、活动屏下即 Manager 页面容器）与按序打点都证明输入正常。真正的缺陷是非原地目标（o66/n67）同时派发 SHORT_CLICKED 与 CLICKED，页面原地重建后第二次落在重新绑定的行上，确认框被立刻取消；v8 后端改为所有目标只认 CLICKED（n66 原本如此，行为不变）。o66 Mirage：Run → 概览 → 模块 → hello_portable → 启用 → 确认框停留 → 确认，`registry.bin` 0x3c = 1，息屏后同一次开机重开 Manager 成功，干净构建 114,508 B 上移除确认框同样正常。已删除上一轮提交进 HEAD 的诊断标记（`mark_bytes` / `mark2`）。n67 走同一路径，但缺 `/system/font` 无法目视。全部为 emulator 证据，真机仍 pending，不提升任何能力状态 | 2026-10-28 |
+| K29 | v8 Manager 改为系统原生样式，n67 上屏（2026-10-29，仅 emulator 证据）：信息块 / 大圆角卡片 / 居中小标题 / 灰标签加白值 / 原生确认框版面，三台共用一套，字号 26/20，颜色按固件用 32 位或 RGB565；内容形状变化时滚回顶部；状态文本补中文。n67 黑屏的两个根因：页面描述符布局比 3.1.32 少一个字段（`on_resume` 从未被调用），以及 `lv_obj_set_local_style_prop` 记录指错（把字体指针低 16 位写成页面视图的 x，页面被画到屏幕外，样式 / 字体全部失效）；3.1.28 补 `lv_obj_set_local_style_prop`，三台补 `lv_obj_scroll_to_y`。n67 完整资源包来自归档的 `ZZ~` 容器（`scripts/emu/unpack_zz.py`），`/system/font` 齐全后中文正常。证据 `EVID-STATIC-1028-V8-004/005`、`EVID-STATIC-9132-V8-004`、`EVID-STATIC-9190-V8-003/004`。n67 / n66 的 `manager_icon.bin` 改为 v8 头（`scripts/convert_manager_icon.py`，两个安装器 Lua 同步）；o66 上 remove-pending 重启不再循环。n66 首次弹窗叠影的根因是 3.1.32 也是短页面布局（`on_create` 被当 resume 调用），已修。三个 v8 目标补 `opendir/readdir/closedir`（`EVID-DIR-1028/9132/9190-001`），「导入手机推送的模块」在 v8 上可用；n67 新资源包上 导入 → 启用 → 重启 → 运行中 全链路通过，n66 导入通过。三台的 launcher 图标都已在应用列表里目视确认（n67 在主列表末尾，o66 / n66 在「更多」末尾，须在息屏弹页前打开启动器，点击能打开 Manager）；模块自带 UI 页面移植到三台（第 4 个 Manager 页面；n66 起初因「原地详情」不支持，后来发现当年「推第三页黑屏」的根因是页描述符布局，去掉原地详情后 n66 同样可用，Band 9 家族常驻上限也提到 184,320），顺带修了 v8 刷新缺 `slot` / `has_previous` / `has_ui` 与开关行不显示状态；Band 10 / Band 9 Pro 的 `supervisor_max_resident` 提到 184,320（多一份约 13 KB 的页面上下文）。Mirage：`uidemo` 在 n67 与 o66 上渲染、点击、开关、返回均通过，n66 回归通过。n67 表盘 Lua 中文已正常（此前 `.notdef` 只是缺 `/system/font`）。n66 / o66 的 Manager 不再在息屏 10 秒后被弹回表盘：固件 `screen_off_cb` 看顶层页描述符 `flags` 的 `(flags & 0x180) == 0x80`，设 `0x0080` 即可；o66 还要改正长布局里 `on_pause / on_destroy / on_ui_destroy` 的偏移（`+0x5c / +0x60 / +0x64`，3.1.28 的暂停阶段调 `+0x5c`），此前息屏时我们的 `on_destroy` 被当暂停回调调用。Mirage 验证：两台息屏 40 秒后页面仍在且可点（o66 的「唤醒后点击无效」只是唤醒后约 2 秒内触摸被固件吞掉），o66 的列表 / 详情 / 模块页 / 弹栈后 Run 重开均通过，n66 图标在「更多」末尾。n66 的图标在弹栈之后也仍在（读了设备里的安装链表：应用记录不受弹栈影响，n66 的启动器按安装表建条目）。o66 的图标靠新增的状态中性命令 `PUBLISH_LAUNCHER` + 安装器表盘的定时器在应用列表存在时写进持久顺序表（Mirage：Manager 一次未开、息屏弹栈后图标仍在，点开可用）。未完成：真机 | 2026-10-29 |
+
+## 模块多页生命周期修复
+
+- [x] 为 UI entry 追加 `on_resume` / `on_pause`，按完整旧前缀或新结构大小规范化复制，保留旧单页入口；C/Rust SDK 和模板同步。修正启动器子页归属识别、首次绑定与恢复，子页销毁不再触发应用关闭，暂停撤销 UI 引用，返回根页保留模型。
+- [x] 模块导航与关闭通过独立前台心跳队列执行；回调深度、未结束的提交和重入心跳阻止提前执行。保留目标直到绑定完成，支持异步固件跳转、拒绝期间的重复导航、跨层 pop，以及外部暂停取消未执行请求。保留暂停页面原生树，恢复时在新上下文重建本地样式。
+- [x] Host ASan/UBSan、SDK C/Rust parity、四目标 ARM 页面模型回归通过；新增用例覆盖同步/异步跳转、两种销毁/恢复顺序、删除后跨过详情页、绘制期间关闭和取消转场。页面后端按 `-Oz` 构建，继续遵守既有文件与驻留预算。
+- [ ] 真机验证；以上不提升符号批准、设备或生产能力状态。
 
 ## Toast API 移除
 

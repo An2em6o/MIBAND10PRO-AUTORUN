@@ -181,9 +181,18 @@ struct canopus_sup_platform_v1 {
     uint32_t (*l2_request_slots)(void *cookie);
     /* Remove one empty directory. Optional; returns negative errno on failure. */
     int (*dir_remove)(void *cookie, const char *path);
+    int (*open_manager)(void *cookie);
     /* Reserve existing firmware apps when allocating a managed identity.
      * Returns 1 when occupied, 0 when free, or a negative error. */
     int (*native_app_id_in_use)(void *cookie, uint16_t app_id);
+    /* Publish the Manager's launcher icon when the launcher page is alive: 0 once
+     * published for it, negative while it is not. Optional. */
+    int (*publish_launcher)(void *cookie);
+    /* The device this target pack is for: its marketing name and panel size
+     * in pixels. "" and 0 x 0 when the pack does not say. */
+    const char *device_model;
+    uint16_t display_width;
+    uint16_t display_height;
 };
 
 int canopus_sup_l2_start(void);

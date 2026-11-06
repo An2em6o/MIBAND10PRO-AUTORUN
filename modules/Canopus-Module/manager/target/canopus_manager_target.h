@@ -35,6 +35,10 @@ extern volatile struct canopus_manager_target_record canopus_manager_target_reco
 
 void canopus_manager_target_render_diagnostics(uint8_t out[36]);
 int canopus_manager_native_install(void);
+int canopus_manager_native_open(void);
+/* Publishes the launcher icon while the launcher page is alive; 0 when it is
+ * published for the current launcher page, negative otherwise. */
+int canopus_manager_native_publish_launcher(void);
 /* Finishes the page a module opened through ctx->ui when it belongs to `slot`
  * (the module closed it or was unloaded). Returns 1 when a page was closed. */
 int canopus_manager_target_module_page_close(uint32_t slot);
@@ -42,6 +46,9 @@ int canopus_manager_target_module_page_close(uint32_t slot);
  * stack: forward routes push (pausing the source), backward routes finish, both
  * with the stock transition. Returns 0 on success or a service error. */
 int canopus_manager_target_module_page_route(uint32_t slot, uint32_t route);
+/* Foreground-only deferred navigation; never drain from a module callback. */
+int canopus_manager_target_module_page_request_close(uint32_t slot);
+void canopus_manager_target_module_pages_poll(void);
 /* Queue one application with managed UI or exact-target native pages.
  * Registration advances one firmware mutation per UI event turn. */
 struct canopus_app_entry_v1;

@@ -10,6 +10,8 @@
 local lvgl = require("lvgl")
 
 local TARGET_ID = "xiaomi-band-9-3.1.32"
+-- Diagnostic only: set true in a test package to run without touch input.
+local AUTORUN = false
 local MANAGER_ICON_RESOURCE = SCRIPT_PATH .. "manager_icon.bin"
 local MANAGER_ICON_PATH = "/data/canopus/manager_icon.bin"
 local STAGE2_PATH = "/data/canopus/stage2.bin"
@@ -24,6 +26,7 @@ local CPC2_ABI_MAJOR = 2
 local CMD_QUERY_DEVICE = 9
 local CMD_INSTALL = 13
 local CMD_RESTORE_AFTER_BOOT = 14
+local CMD_OPEN_MANAGER = 29
 local RESULT_COMPLETED = 5
 local request_id = 0
 local STAGE0_ENTRY_MARKER = 0xA5A5A5A5
@@ -89,7 +92,7 @@ local function load_profile(selected_target)
         or type(value.device_status) ~= "string"
         or (value.cave_original_known ~= nil
             and type(value.cave_original_known) ~= "boolean")
-        or value.loader_family ~= "nsh-mw-stage1-stage2" then
+        or (value.loader_family ~= "nsh-mw-stage1-stage2" and value.loader_family ~= "staged-kmem-mpu") then
         return nil
     end
     for _, key in ipairs({
@@ -226,6 +229,10 @@ local function mpu_sync_command()
     return string.format("exec 0x%08x", profile.mpu_sync)
 end
 
+-- A cave exec that never returns skips the release queued behind it, leaving
+-- stage-0's region armed read-only for the rest of the boot (this firmware does
+-- not reprogram the MPU per task); the next cave write then faults at the cave
+-- base with MemManage on 3.1.32/3.1.190.
 local function stage0_mpu_release()
     return run_sequence({
         string.format("mw %08x=%08x", profile.mpu_rnr,
@@ -286,21 +293,25 @@ end
 
 local function call_mailbox(callable, r0, r1)
     local probe = {
-        0x49034802, 0x4A036008, 0xBF004710,
-        STAGE0_ENTRY_PROBE_MARKER, profile.cave_result, 0x0c1c956d,
+        -- bx lr: the probe only has to prove the cave executes. Branching
+        -- into exec_handler+0x45 lands mid-function and the epilogue pops a
+        -- synthetic frame (UsageFault on 3.1.32/3.1.190).
+        0x49034802, 0x4A036008, 0xBF004770,
+        STAGE0_ENTRY_PROBE_MARKER, profile.cave_result, profile.exec_handler + 0x45,
     }
     local trampoline = {
         0x8F4FF3BF, 0x8F6FF3BF,
         0x49064805, 0x4B074A06, 0x4B076013, 0x4A044798,
         0x4B066010, 0xBF004718,
         r0, r1, profile.cave_result, STAGE0_ENTRY_MARKER, callable,
-        0x0c1c956d,
+        profile.exec_handler + 0x45,
     }
     if not check_cave() then return nil, "stage-0 preflight mismatch" end
     if not run(string.format("mw %08x=%08x", profile.cave_result,
         profile.cave_result)) then
         return nil, "stage-0 result sentinel write failed"
     end
+    stage0_mpu_release()
     if not write_words(profile.cave, probe) then
         restore_cave()
         return nil, "stage-0 entry probe write failed"
@@ -325,6 +336,7 @@ local function call_mailbox(callable, r0, r1)
         restore_cave()
         return nil, "stage-0 result sentinel write failed"
     end
+    stage0_mpu_release()
     if not write_words(profile.cave, trampoline) then
         restore_cave()
         return nil, "stage-0 mailbox write failed"
@@ -358,6 +370,7 @@ local function barrier_and_exec(address, region, rbar, rlar)
         STAGE1_RESULT_SENTINEL)) then
         return false
     end
+    stage0_mpu_release()
     if not write_words(profile.cave, trampoline) then
         restore_cave()
         return false
@@ -454,7 +467,98 @@ local function cleanup_stage1(address, region)
     return release_allocation(address, profile.kmem_free)
 end
 
+-- Targets that expose the runtime MPU lease bitmap pick a free region for
+-- stage 0 and reserve it while stage 1 allocates its own lease, so the two can
+-- never collide. The original bitmap is restored after cleanup.
+local stage0_bitmap_original
+local function reserve_stage0_region()
+    if type(profile.mpu_bitmap) ~= "number" then return true end
+    local bitmap = shell_word(profile.mpu_bitmap)
+    if type(bitmap) ~= "number" then return false, "MPU bitmap read failed" end
+    for region = 0, profile.mpu_region_count - 1 do
+        if (bitmap & (1 << region)) == 0 then
+            profile.stage0_region = region
+            stage0_bitmap_original = bitmap
+            if not run(string.format("mw %08x=%08x", profile.mpu_bitmap,
+                bitmap | (1 << region))) then
+                return false, "MPU bitmap reservation failed"
+            end
+            return true
+        end
+    end
+    return false, "no free MPU region"
+end
+local function release_stage0_region()
+    if type(stage0_bitmap_original) ~= "number" then return true end
+    local ok = run(string.format("mw %08x=%08x", profile.mpu_bitmap,
+        stage0_bitmap_original))
+    stage0_bitmap_original = nil
+    return ok
+end
+
+-- Cave entry mode: stage 1 is written into the MPU-mapped cave and executed
+-- directly. Stage 1 performs the Kmem/MPU/stage-2 work in C, so this path does
+-- not depend on the firmware exec handler's Lua continuation ABI.
+local function load_supervisor_cave()
+    local stage1_source = read_all(stage1_resource, "r")
+    local stage2 = read_all(stage2_resource, "rb")
+    local supervisor = read_all(supervisor_resource, "rb")
+    if type(stage1_source) ~= "string" or type(stage2) ~= "string"
+        or type(supervisor) ~= "string" then
+        return false, "missing Band 9 bootstrap resources"
+    end
+    local compiler = loadstring or load
+    if type(compiler) ~= "function" then return false, "Lua compiler unavailable" end
+    local compiled, chunk, compile_error = pcall(compiler, stage1_source)
+    if not compiled then return false, tostring(chunk) end
+    if type(chunk) ~= "function" then return false, tostring(compile_error) end
+    local loaded, payload = pcall(chunk)
+    if not loaded then return false, tostring(payload) end
+    if type(payload) ~= "table" or type(payload.words) ~= "table"
+        or type(payload.size) ~= "number" or payload.size > 0xE00 then
+        return false, "invalid Band 9 stage-1 table"
+    end
+    run("mkdir /data/canopus")
+    if not write_all(STAGE2_PATH, stage2) then
+        return false, "cannot stage Band 9 stage-2"
+    end
+    if not write_all(SUPERVISOR_PATH, supervisor) then
+        return false, "cannot stage Band 9 Supervisor"
+    end
+    if not check_cave() then return false, "stage-0 preflight mismatch" end
+    local reserved, reserve_error = reserve_stage0_region()
+    if not reserved then return false, reserve_error end
+    local stage1_address = profile.cave + 0x100
+    stage0_mpu_release()
+    if not write_words(stage1_address, payload.words) then
+        release_stage0_region()
+        return false, "stage-1 cave write failed"
+    end
+    -- Preserve the NSH exec caller's LR across blx; the old tail's
+    -- bx lr reused the blx return address and looped in the cave.
+    local trampoline = {
+        0x4803B510, 0x47984B03, 0x60104A01, 0xBF00BD10,
+        profile.cave_result, stage1_address + 1,
+    }
+    stage0_mpu_release()
+    if not write_words(profile.cave, trampoline) then
+        release_stage0_region()
+        return false, "stage-0 trampoline write failed"
+    end
+    local exec_ok = stage0_exec_with_mpu(nil, nil, false)
+    release_stage0_region()
+    local result = shell_word(profile.cave_result)
+    if result == nil then return false, "stage-1 result read failed" end
+    if result >= 0x80000000 then result = result - 0x100000000 end
+    if not exec_ok and result == profile.cave_result then
+        return false, "stage-0 exec parser rejected target"
+    end
+    if result ~= 0 then return false, stage_result_error(result) end
+    return true
+end
+
 local function load_supervisor()
+    if profile.entry_mode == "cave" then return load_supervisor_cave() end
     local stage1_source = read_all(stage1_resource, "r")
     local stage2 = read_all(stage2_resource, "rb")
     local supervisor = read_all(supervisor_resource, "rb")
@@ -477,6 +581,7 @@ local function load_supervisor()
     -- NSH reports failure when the directory already exists, but staging is still
     -- valid in that case and the following writes are authoritative.
     run("mkdir /data/canopus")
+    run("mkdir /data/canopus/inbox")
     if not write_all(STAGE2_PATH, stage2) then
         return false, "cannot stage Band 9 stage-2"
     end
@@ -502,14 +607,23 @@ local function load_supervisor()
         end
         return false, "Band 9 stage-1 write failed"
     end
+    local reserved, reserve_error = reserve_stage0_region()
+    if not reserved then
+        if not release_allocation(raw_allocation) then
+            return false, "MPU reservation cleanup failed; reboot before retrying"
+        end
+        return false, reserve_error
+    end
     local region = call_mailbox(profile.mpu_alloc, 0, 0)
     if not region or region >= profile.mpu_region_count then
+        release_stage0_region()
         if not release_allocation(raw_allocation) then
             return false, "MPU failure cleanup failed; reboot before retrying"
         end
         return false, "Band 9 MPU region unavailable"
     end
     if region == profile.stage0_region then
+        release_stage0_region()
         if not release_allocation(raw_allocation) then
             return false, "MPU collision cleanup failed; reboot before retrying"
         end
@@ -521,6 +635,7 @@ local function load_supervisor()
     local executed, stage_result, execution_error = barrier_and_exec(
         allocation, region, rbar, rlar)
     local cleaned = cleanup_stage1(raw_allocation, region)
+    release_stage0_region()
     if not cleaned then
         return false, "stage-1 cleanup failed; reboot before retrying"
     end
@@ -533,13 +648,17 @@ end
 
 local function stage_manager_icon()
     local content = read_all(MANAGER_ICON_RESOURCE, "rb")
-    if type(content) ~= "string" or #content < 13
-        or content:byte(1) ~= 0x19 then
+    -- lv_img_header_t: colour format in bits 0-4 (5 = true colour with alpha),
+    -- width in bits 10-20, height in bits 21-31, then RGB565 + alpha pixels.
+    if type(content) ~= "string" or #content < 5
+        or content:byte(1) % 32 ~= 5 then
         return false, "missing or invalid manager_icon.bin"
     end
-    local width = content:byte(5) + content:byte(6) * 0x100
-    local height = content:byte(7) + content:byte(8) * 0x100
-    if width < 1 or height < 1 or #content ~= 12 + width * height * 4 then
+    local header = content:byte(1) + content:byte(2) * 0x100
+        + content:byte(3) * 0x10000 + content:byte(4) * 0x1000000
+    local width = (header // 0x400) % 0x800
+    local height = (header // 0x200000) % 0x800
+    if width < 1 or height < 1 or #content ~= 4 + width * height * 3 then
         return false, "manager_icon.bin size mismatch"
     end
     local output = io.open(MANAGER_ICON_PATH, "wb")
@@ -609,7 +728,7 @@ local function exchange(command, payload, reply_size)
 end
 
 local function device_error()
-    local reply = exchange(CMD_QUERY_DEVICE, nil, CPC2_HEADER + 36)
+    local reply = exchange(CMD_QUERY_DEVICE, nil, CPC2_HEADER + 88) -- CQD1 payload: 88 bytes
     return reply and signed32(u32le(reply, CPC2_HEADER + 24)) or 0
 end
 
@@ -646,6 +765,8 @@ local steps = {
       progress = "Registering module apps..." },
     { command = CMD_INSTALL, arg0 = 2,
       progress = "Updating application list..." },
+    { command = CMD_OPEN_MANAGER, arg0 = 0,
+      progress = "Opening Manager..." },
 }
 
 local function set_status(text, color)
@@ -756,7 +877,7 @@ local function make_button(text, color, on_clicked)
 end
 
 local run_button
-run_button = make_button("Run", '#14508a', function()
+local function run_installer()
     clear_armed = false
     if profile.device_status == "DEVICE_REJECTED" then
         set_status("LOAD blocked: stage-0 candidate rejected\n"
@@ -764,11 +885,22 @@ run_button = make_button("Run", '#14508a', function()
         return
     end
     if run_attempted then
-        set_status("Run can only be used once; reboot before retrying")
+        -- The Supervisor stays resident across page switches, so Run doubles
+        -- as "open the Manager" once the install has run: 3.1.32 finishes
+        -- every page ten seconds after the screen sleeps, and the page
+        -- manager drops an app when its last page finishes, so OPEN_MANAGER
+        -- has to re-register the Manager app before pushing its page.
+        if supervisor_present() then
+            local opened, open_error = execute_step(CMD_OPEN_MANAGER, 0)
+            set_status(opened and "Manager opened"
+                or ("Open failed: " .. tostring(open_error)),
+                opened and '#8ff0a4' or '#ff9a9a')
+        else
+            set_status("Run can only be used once; reboot before retrying")
+        end
         return
     end
     run_attempted = true
-    run_button:clear_flag(lvgl.FLAG.CLICKABLE)
     local valid, validation_error = verify_module_file(supervisor_resource)
     if not valid then
         set_status("LOAD failed: " .. tostring(validation_error), '#ff9a9a')
@@ -791,7 +923,9 @@ run_button = make_button("Run", '#14508a', function()
     run_phase = 1
     set_status("Supervisor loaded; installing...")
     run_all_steps()
-end)
+end
+
+run_button = make_button("Run", '#14508a', run_installer)
 
 make_button("Clear Env", '#8a1f14', function()
     if run_active then
@@ -813,3 +947,7 @@ make_button("Clear Env", '#8a1f14', function()
 end)
 
 set_status("Ready")
+
+if AUTORUN then
+    run_installer()
+end

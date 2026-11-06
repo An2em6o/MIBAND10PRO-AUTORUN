@@ -55,6 +55,18 @@ static uint32_t bounded_len(const char *value, uint32_t cap)
     return len;
 }
 
+/* Styling and the message-box component are optional: a target backend that
+ * cannot render them declares no capability and the tree stays plain, so the
+ * whole page is not rejected for a role the firmware has no API for. */
+static int native_supports(const struct canopus_manager_native_v1 *native,
+                           uint32_t cap)
+{
+    if (native == 0 || native->ui.backend == 0) {
+        return 0;
+    }
+    return (native->ui.backend->capabilities & cap) != 0u;
+}
+
 static int stage_token_ok(const char *token, uint32_t len)
 {
     uint32_t i;
@@ -124,6 +136,12 @@ static const char *manager_state_name(uint32_t state)
     case CANOPUS_STATE_UNLOADED: return "已卸载";
     case CANOPUS_STATE_BOOT_RESIDENT: return "启动时常驻";
     case CANOPUS_STATE_DISABLED_NEXT_BOOT: return "下次启动时禁用";
+    case CANOPUS_STATE_FAILED: return "运行失败";
+    case CANOPUS_STATE_FAIL_STOP: return "故障停止";
+    case CANOPUS_STATE_QUARANTINED_NEXT_BOOT: return "下次启动时隔离";
+    case CANOPUS_STATE_UPDATE_STAGED: return "更新已暂存";
+    case CANOPUS_STATE_REBOOT_REQUIRED: return "需要重启";
+    case CANOPUS_STATE_REMOVE_PENDING: return "等待移除";
     default: return canopus_state_name(state);
     }
 }
@@ -456,7 +474,7 @@ static int32_t render_module_list(struct canopus_manager_native_v1 *native,
     if (rc != CANOPUS_UI_OK) return rc;
     if (model->module_count == 0u) {
         rc = append_text(tree, UI_KEY_MODULE_EMPTY,
-                         "No external modules installed", sizeof("No external modules installed") - 1u, 0u);
+                         "暂无已安装模块", sizeof("暂无已安装模块") - 1u, 0u);
         if (rc != CANOPUS_UI_OK) return rc;
     }
     for (i = 0; i < model->module_count; i++) {
@@ -578,10 +596,17 @@ static int32_t render_confirmation(struct canopus_manager_native_v1 *native,
     int32_t rc;
     /* A dialog: the message, then the buttons in message-box order (cancel,
      * confirm). Where the backend has no message box they are ordinary rows. */
-    rc = CANOPUS_UI_COMPONENT(tree, UI_KEY_CONFIRM_SECTION, CANOPUS_UI_NODE_DIALOG,
-                              "确认操作", "", 0u, CANOPUS_UI_NODE_FLAG_VISIBLE);
+    if (native_supports(native, CANOPUS_UI_CAP_EXTENDED_COMPONENTS)) {
+        rc = CANOPUS_UI_COMPONENT(tree, UI_KEY_CONFIRM_SECTION,
+                                  CANOPUS_UI_NODE_DIALOG, "确认操作", "", 0u,
+                                  CANOPUS_UI_NODE_FLAG_VISIBLE);
+    } else {
+        rc = CANOPUS_UI_SECTION(tree, UI_KEY_CONFIRM_SECTION, "确认操作");
+    }
     if (rc != CANOPUS_UI_OK) return rc;
-    rc = append_text(tree, UI_KEY_CONFIRM_MESSAGE, message, 128u, 2u);
+    rc = append_text(tree, UI_KEY_CONFIRM_MESSAGE, message, 128u,
+                     native_supports(native, CANOPUS_UI_CAP_STYLE)
+                         ? CANOPUS_UI_TEXT_DESCRIPTION : CANOPUS_UI_TEXT_BODY);
     if (rc != CANOPUS_UI_OK) return rc;
     rc = append_action(tree, UI_KEY_CONFIRM_CANCEL, "取消", sizeof("取消") - 1u,
                        "返回且不更改", sizeof("返回且不更改") - 1u,
@@ -624,7 +649,7 @@ int32_t canopus_manager_native_render(struct canopus_manager_native_v1 *native)
     page.title = title;
     page.title_len = bounded_len(title, title_cap);
     rc = canopus_ui_navigation_page(tree, UI_KEY_ROOT, &page);
-    if (rc == CANOPUS_UI_OK) {
+    if (rc == CANOPUS_UI_OK && native_supports(native, CANOPUS_UI_CAP_STYLE)) {
         canopus_memset(&title_style, 0, sizeof(title_style));
         title_style.text_style = CANOPUS_UI_TEXT_TITLE;
         title_style.corner_radius = -1;

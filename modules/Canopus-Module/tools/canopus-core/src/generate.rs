@@ -27,26 +27,42 @@ pub fn outputs_for(targets_dir: &Path, pack: &TargetPack) -> Result<Vec<Output>>
     let root = targets_dir.join(&pack.target_id);
     let (symbols, types) = load_records(&root)?;
     let gen_dir = root.join("generated");
-    let mut outputs = vec![
-        Output {
-            path: gen_dir.join("canopus_veneer.h"),
-            content: VeneerGen { pack, symbols: &symbols, types: &types }.generate(),
-        },
-        Output {
-            path: gen_dir.join("canopus_target_config.h"),
-            content: TargetConfigGen { pack, symbols: &symbols }.generate(),
-        },
-    ];
-    let Some(rust_module) = pack.rust_module.as_deref() else {
-        return Ok(outputs);
-    };
-    let rust = RustGen { pack, symbols: &symbols, types: &types }.generate();
-    let sdk = repo.join("sdk/rust");
     let family = pack
         .family
         .as_deref()
         .map(|f| load_family(targets_dir, f))
         .transpose()?;
+    let mut outputs = vec![
+        Output {
+            path: gen_dir.join("canopus_veneer.h"),
+            content: VeneerGen {
+                pack,
+                symbols: &symbols,
+                types: &types,
+            }
+            .generate(),
+        },
+        Output {
+            path: gen_dir.join("canopus_target_config.h"),
+            content: TargetConfigGen {
+                pack,
+                symbols: &symbols,
+                native_config: family.as_ref().is_some_and(|f| f.native_config),
+            }
+            .generate(),
+        },
+    ];
+    let Some(rust_module) = pack.rust_module.as_deref() else {
+        return Ok(outputs);
+    };
+    let rust = RustGen {
+        pack,
+        symbols: &symbols,
+        types: &types,
+    }
+    .generate();
+    let sdk = repo.join("sdk/rust");
+
     if family.as_ref().is_some_and(|f| f.private_symbols) {
         outputs.push(Output {
             path: sdk.join(format!(

@@ -84,17 +84,34 @@ class ModuleInstallerTests(unittest.TestCase):
             if not image.is_file():
                 continue
             device = target.rsplit('-', 1)[0]
-            snippet = (ROOT / 'watchfaces/module-installer-prod/src' /
-                       ('device-' + device + '.lua')).read_text()
-            key = re.search(r'BUILD_PROPERTY = "([^"]+)"', snippet)[1]
+            device_file = builder.device_hook(device)
+            if not device_file.is_file():
+                continue
+            snippet = device_file.read_text()
+            declared = re.search(r'BUILD_PROPERTY = "([^"]+)"', snippet)
             data = image.read_bytes()
-            # ROMFS entry: 16-byte padded name, then the file content.
-            start = data.index(b'build.prop'.ljust(16, b'\0') + b'ro.build.') + 16
+            # ROMFS entry: 16-byte padded name, then the file content. The
+            # content is not guaranteed to start with ro.build (3.1.190 has
+            # only screenshape/devicetype/screendensity), so find the entry.
+            entry = data.find(b'build.prop'.ljust(16, b'\0'))
+            self.assertGreaterEqual(entry, 0, target)
+            start = entry + 16
             text = data[start:data.index(b'\0', start)].decode()
             props = dict(line.split('=', 1) for line in text.splitlines())
             pack = tomllib.loads((ROOT / 'targets' / target / 'target.toml').read_text())
-            self.assertEqual(props['ro.build.version'], pack['firmware_version'], target)
-            self.assertEqual(props[key], pack['firmware_build'], target)
+            if 'ro.build.version' in props:
+                self.assertEqual(props['ro.build.version'], pack['firmware_version'], target)
+            else:
+                # No version in this ROMFS: the hook must ask the Supervisor.
+                # An image that grew one again has to be re-read, not left on
+                # the fallback.
+                self.assertIn('device_firmware_version', snippet, target)
+            if declared:
+                self.assertEqual(props[declared[1]], pack['firmware_build'], target)
+            else:
+                # A family whose build.prop has no build id must not force one:
+                # the generated check then relies on the staged receipt.
+                self.assertNotIn(pack['firmware_build'], props.values(), target)
             checked += 1
         if not checked:
             self.skipTest('firmware images required')

@@ -5,31 +5,37 @@
   "name": "bt_queue_external",
   "kind": "function",
   "instruction_set": "thumb",
-  "entry_address": "0xc98fdd0",
-  "prototype": "int(void *, void *, void *, void *, uint8_t)",
+  "entry_address": "0x1c167d40",
+  "callable_address": "0x1c167d41",
+  "prototype": "int bt_queue_external(uintptr_t owner,int (*run)(uintptr_t,uint32_t,void *),int (*cancel)(uintptr_t,uint32_t,void *),void *argument,uint8_t event)",
   "calling_convention": "arm-aapcs",
   "contexts": {
     "allowed": [
       "target-private"
     ],
-    "blocking": false
+    "blocking": true
+  },
+  "ownership": {
+    "argument": "Cross-task external ring retains argument for run/cancel; it does not free argument. Uninitialized queue calls cancel(0,221,argument) synchronously. Return is unlock semaphore result or cancel result, not acceptance status."
   },
   "proof": {
-    "static": "candidate",
+    "static": "recovered",
     "device": "not_probed",
     "evidence_ids": [
-      "EVID-PORT-P65-001"
+      "EVID-ASTROLINK-P65-001",
+      "EVID-ASTROLINK-P65-BLUELET-QUEUE-006"
     ]
   },
   "policy": "restricted",
-  "status": "CANDIDATE",
+  "status": "STATIC_RECOVERED",
+  "approval_state": "PENDING",
   "provenance": {
     "firmware_sha256": "a19b601477569765103eaf468b937bd8026b4d68ffa5c896bde222a79e475858",
     "evidence_ids": [
-      "EVID-PORT-P65-001"
+      "EVID-ASTROLINK-P65-001",
+      "EVID-ASTROLINK-P65-BLUELET-QUEUE-006"
     ],
-    "source": "Exact redmi-watch-6-3.100.043 image/IDB compared with xiaomi-band-10-pro-3.101.043: body differs (instruction fingerprint and pseudocode)."
+    "source": "Exact-image external-ring producer0x0C98FDD0 and consumer0x0C98FBE0; locked publication and wake on empty-to-nonempty transition. Replaces owner-only internal insertion0x0C98FD8C."
   },
-  "approval_state": "PENDING",
-  "notes": "body differs (instruction fingerprint and pseudocode). Source semantic status was STATIC_RECOVERED; matching does not upgrade an uncertain source name/prototype. ABI and ownership follow the source record only within the audited port scope. Physical device validation pending; no approval carries over from the source target. exact 3.101.043 recovery; mapped from 3.101.036 by dual-source fw-match and IDA shape review (bt_queue_external) Address refreshed by trusted-036 caller-neighborhood ensemble v2; semantic policy retained from the curated 043 record. Address refreshed by trusted-036 caller-neighborhood ensemble v2; semantic policy retained from the curated 043 record."
+  "notes": "Five arguments retain the existing order and final event byte1. Veneer0x1C167D40 ->0x0C98FDD0 locks/publishes the external ring and posts Bluelet semaphore0x3C492750 when needed. Old0x1C1676C8 ->0x0C98FD8C is owner-only list insertion without wake. May block; not an interrupt-context API. Restricted/PENDING, no runtime approval."
 }

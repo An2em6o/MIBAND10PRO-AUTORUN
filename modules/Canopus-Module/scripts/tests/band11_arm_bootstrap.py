@@ -110,6 +110,7 @@ class Machine:
         self.app = 0; self.pages = []; self.launcher = []; self.module_apps = {}; self.widgets = {}; self.next_widget = 0x200a0000
         self.notifications = []
         hooks = {0x0c8f2bb0:self.notification_insert,
+                 0x0c3513e8:self.heap_malloc,
                  0x0c3507e8:self.allocate,0x0c34ccb8:self.free,
                  0x0c34cd2c:self.free,0x0c34f0a0:self.mallinfo,
                  0x0c342c54:self.open,0x0c33818c:self.close,0x0c33d784:self.read,
@@ -208,6 +209,19 @@ class Machine:
         for i,value in enumerate((largest+used,1,len(self.allocations),largest,used,largest,largest)):
             self.word(out+4*i,value)
         return out
+    def heap_malloc(self):
+        # heap_malloc(size): the wrapper loads the Umem descriptor from
+        # 0x200b2590 itself, so only the size is an argument. The firmware
+        # panics when mm_malloc fails, so every request is served from the
+        # same modeled arena as mm_memalign.
+        size=self.reg(0)
+        assert size <= self.heap_largest(0x3c356b40),('unchecked allocation',size)
+        self.alloc_calls+=1
+        if self.hurt('nomem') or self.hurt(f'alloc_{self.alloc_calls}'): return 0
+        p=(self.next_temp+7)&~7; self.next_temp=p+size+16
+        self.allocations[p]=size
+        self.uc.mem_write(p,b'\xcc'*size)
+        return p
     def allocate(self):
         heap,align,size=self.reg(0),self.reg(1),self.reg(2)
         assert heap in (0x2010e9e0,0x3c356b40) and align and align & (align-1)==0
@@ -302,6 +316,8 @@ class Machine:
             for off in (0x34,0x4c,0x50,0x5c,0x64):assert self.word(page+off)&1
             self.module_apps[app_id]={'package':package,'icon':self.string(self.word(ptr+16)),
                                       'label_callback':self.word(ptr+36),'page':page}
+            # the installed record the firmware's app_lookup hands back
+            self.uc.mem_write(self.module_app(app_id),bytes(self.uc.mem_read(ptr,80)))
             self.uc.mem_write(ptr+23,b'\x01\x01')
             return 0
         assert count==4
@@ -315,9 +331,11 @@ class Machine:
         self.app=0x200c0000;self.uc.mem_write(self.app,bytes(self.uc.mem_read(ptr,80)))
         self.uc.mem_write(ptr+23,b'\x01\x01') # firmware defaults mutate input
         return 0
+    def module_app(self,app_id):
+        return 0x200c1000+(app_id-0xcc)*0x80
     def app_lookup(self):
         app_id=self.reg(0)
-        return self.app if app_id==0xca else (0x200c1000+app_id if app_id in self.module_apps else 0)
+        return self.app if app_id==0xca else (self.module_app(app_id) if app_id in self.module_apps else 0)
     def launcher_add(self):
         app_id=self.reg(0)
         assert (app_id==0xca and self.app) or app_id in self.module_apps
@@ -471,7 +489,7 @@ class BootstrapTests(unittest.TestCase):
         rows = [p for p, w in m.widgets.items() if w.get('kind') == 'row']
         self.assertTrue(rows)
         for row in rows:
-            self.assertEqual((m.widgets[row]['width'], m.widgets[row]['height']), (204, 96))
+            self.assertEqual((m.widgets[row]['width'], m.widgets[row]['height']), (212, 96))
             self.assertEqual(ui.get(m.word(row + 0x3c), 0, 0x5a), ui.FONT28)
             if m.word(row + 0x40):
                 self.assertEqual(ui.get(m.word(row + 0x40), 0, 0x5a), ui.FONT24)

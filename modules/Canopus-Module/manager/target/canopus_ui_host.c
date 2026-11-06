@@ -42,7 +42,16 @@
 #define HOST_TRAILING_FORWARD 3u
 #define HOST_ALIGN_TOP_MID 2u
 #define HOST_ALIGN_OUT_BOTTOM_MID 14u
-#ifndef CANOPUS_MGR_BAND11
+#if defined(CANOPUS_MGR_REDMI_WATCH)
+#define HOST_CONTENT_TOP_OFFSET 56
+#define HOST_CONTENT_WIDTH 432
+#define HOST_CONTENT_HEIGHT 458
+#define HOST_ROW_WIDTH 432
+#define HOST_BAR_WIDTH 432
+#define HOST_CONTENT_PAD_TOP 0
+#define HOST_CONTENT_PAD_BOTTOM 32
+#define HOST_LABEL_LINE_CHARS 36u
+#elif !defined(CANOPUS_MGR_BAND11)
 #define HOST_CONTENT_TOP_OFFSET 56
 #define HOST_CONTENT_WIDTH 336
 #define HOST_CONTENT_HEIGHT 424
@@ -1131,8 +1140,10 @@ static int32_t host_create_node(struct canopus_ui_host_node *slot, void *parent,
                bytes apart); keep them so the row thunk can listen on every
                hit target. A 32-bit read is the pointer itself on target and an
                opaque identity token on wider hosts. */
+#if defined(FW_LVX_LIST_PRIMARY_OFFSET) && defined(FW_LVX_LIST_SECONDARY_OFFSET)
             slot->hit_extra[0] = (void *)(uintptr_t)*(const uint32_t *)((const uint8_t *)object + FW_LVX_LIST_PRIMARY_OFFSET);
             slot->hit_extra[1] = (void *)(uintptr_t)*(const uint32_t *)((const uint8_t *)object + FW_LVX_LIST_SECONDARY_OFFSET);
+#endif
             slot->hit_extra[2] = *(void **)((uint8_t *)object + FW_LVX_LIST_TRAILING_OFFSET);
         }
 #endif
@@ -1199,6 +1210,12 @@ static int32_t host_image_scales(const void *source, const struct host_geometry 
 }
 #endif
 
+/* Replacement nodes staged by host_apply (2.6 KiB). They live outside the
+ * stack because page callbacks run on firmware task stacks of 4 KiB.
+ * host_apply never nests: native callbacks reach a module only on CLICKED /
+ * VALUE_CHANGED, which the object creation and deletion done here do not send. */
+static struct canopus_ui_host_node s_candidates[CANOPUS_UI_MAX_NODES];
+
 static int32_t host_apply(void *cookie, const struct canopus_ui_snapshot_v1 *snapshot)
 {
     struct canopus_ui_host_view *view = cookie;
@@ -1211,7 +1228,7 @@ static int32_t host_apply(void *cookie, const struct canopus_ui_snapshot_v1 *sna
     struct host_font *fonts[CANOPUS_UI_MAX_NODES] = {0};
 #endif
     uint8_t map[CANOPUS_UI_MAX_NODES], fresh[CANOPUS_UI_MAX_NODES] = {0};
-    struct canopus_ui_host_node candidates[CANOPUS_UI_MAX_NODES];
+    struct canopus_ui_host_node *candidates = s_candidates;
     void *extent_candidates[CANOPUS_UI_MAX_NODES] = {0};
     void *content_candidate = NULL;
     int32_t retained_scroll = 0;
@@ -1289,7 +1306,9 @@ static int32_t host_apply(void *cookie, const struct canopus_ui_snapshot_v1 *sna
         const struct canopus_ui_node_v1 *old = host_previous_key(previous,n->key);
         uint32_t oi = old != NULL ? (uint32_t)(old - previous->nodes) : 0;
         uint32_t parent_key = n->parent == CANOPUS_UI_NO_NODE ? 0u : snapshot->nodes[n->parent].key;
-        fresh[i] = slot->object == NULL || slot->key != n->key || slot->type != n->type || slot->parent_key != parent_key ||
+        /* A resumed page may retain native objects but have a fresh context.
+         * Recreate their local styles instead of diffing a missing snapshot. */
+        fresh[i] = old == NULL || slot->object == NULL || slot->key != n->key || slot->type != n->type || slot->parent_key != parent_key ||
 #ifdef HOST_IMAGE_FIT
             /* A native dialog commits its own snapshot while retaining the
              * body: representation must come from the live image slot. */
@@ -1307,7 +1326,7 @@ static int32_t host_apply(void *cookie, const struct canopus_ui_snapshot_v1 *sna
                              ~host_local_style(&snapshot->styles[i],&snapshot->visuals[i]))) ||
             (n->parent != CANOPUS_UI_NO_NODE && fresh[n->parent]);
     }
-    canopus_memset(candidates, 0, sizeof(candidates));
+    canopus_memset(candidates, 0, sizeof(s_candidates));
     if (fresh[0]) {
         const struct canopus_ui_node_v1 *old = host_previous_key(previous,snapshot->nodes[0].key);
         if (old != NULL && old->type == CANOPUS_UI_NODE_NAVIGATION_PAGE && view->nodes[map[0]].object != NULL) {
@@ -1470,8 +1489,10 @@ static int32_t host_apply(void *cookie, const struct canopus_ui_snapshot_v1 *sna
                     ((void (*)(void *,const void *,const char *,const char *,int32_t,uint8_t))(uintptr_t)FW_LVX_LIST_ITEM_UPDATE)(slot->object,NULL,primary,secondary,0,selected);
                     /* The firmware creates a missing secondary label lazily on
                        the first non-empty text; adopt the new hit target. */
+#if defined(FW_LVX_LIST_PRIMARY_OFFSET) && defined(FW_LVX_LIST_SECONDARY_OFFSET)
                     host_hit_add(slot,host_row_events[map[i]],(void *)(uintptr_t)*(const uint32_t *)((const uint8_t *)slot->object + FW_LVX_LIST_PRIMARY_OFFSET));
                     host_hit_add(slot,host_row_events[map[i]],(void *)(uintptr_t)*(const uint32_t *)((const uint8_t *)slot->object + FW_LVX_LIST_SECONDARY_OFFSET));
+#endif
                     host_hit_add(slot,host_row_events[map[i]],*(void **)((uint8_t *)slot->object + FW_LVX_LIST_TRAILING_OFFSET));
 #endif
                 }
